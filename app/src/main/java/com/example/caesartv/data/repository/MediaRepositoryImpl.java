@@ -30,6 +30,8 @@ public class MediaRepositoryImpl implements MediaRepository {
     private final Context context;
     private final OkHttpClient client;
     private final ExecutorService executor;
+    private static final int MAX_DOWNLOAD_RETRIES = 3;
+    private static final long BASE_RETRY_DELAY_MS = 2000;
 
     public MediaRepositoryImpl(WebSocketDataSource webSocketDataSource, MediaDao mediaDao, Context context, ExecutorService executor) {
         this.webSocketDataSource = webSocketDataSource;
@@ -37,8 +39,9 @@ public class MediaRepositoryImpl implements MediaRepository {
         this.context = context;
         this.executor = executor;
         this.client = new OkHttpClient.Builder()
-                .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
-                .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(120, java.util.concurrent.TimeUnit.SECONDS)
+                .writeTimeout(120, java.util.concurrent.TimeUnit.SECONDS)
                 .build();
     }
 
@@ -48,6 +51,7 @@ public class MediaRepositoryImpl implements MediaRepository {
                 mediaItems -> {
                     executor.execute(() -> {
                         try {
+                            Log.d(TAG, "Received " + mediaItems.size() + " media items from WebSocket");
                             // Clear old data
                             mediaDao.deleteAll();
                             mediaDao.deleteAllUrls();
@@ -58,7 +62,10 @@ public class MediaRepositoryImpl implements MediaRepository {
                             for (MediaItem item : mediaItems) {
                                 String localFilePath = downloadVideo(item.getUrl(), item.getId());
                                 Log.d(TAG, "Media ID: " + item.getId() + ", Local file path: " + localFilePath);
-                                entities.add(toEntity(item, localFilePath));
+                                // Use remote URL if download fails
+                                String finalFilePath = localFilePath != null ? localFilePath : item.getUrl();
+                                Log.d(TAG, "Saving media ID: " + item.getId() + " with final file path: " + finalFilePath);
+                                entities.add(toEntity(item, finalFilePath));
                                 for (MediaUrl url : item.getMultipleUrl()) {
                                     urlEntities.add(new MediaUrlEntity(url.getUrlType(), url.getUrl(), url.getId(), item.getId()));
                                 }
@@ -116,7 +123,7 @@ public class MediaRepositoryImpl implements MediaRepository {
                 item.getDescription(),
                 item.getMediaType(),
                 item.getUrl(),
-                localFilePath, // Set to null if download failed
+                localFilePath,
                 item.getThumbnailUrl(),
                 item.getDuration(),
                 item.getDisplayOrder(),
@@ -150,7 +157,7 @@ public class MediaRepositoryImpl implements MediaRepository {
                 entity.createdAt,
                 entity.updatedAt
         );
-        mediaItem.setLocalFilePath(entity.localFilePath); // Preserve localFilePath
+        mediaItem.setLocalFilePath(entity.localFilePath);
         return mediaItem;
     }
 
@@ -160,55 +167,66 @@ public class MediaRepositoryImpl implements MediaRepository {
             return null;
         }
 
-        try {
-            File dir = new File(context.getFilesDir(), "videos");
-            if (!dir.exists() && !dir.mkdirs()) {
-                Log.e(TAG, "Failed to create videos directory: " + dir.getAbsolutePath());
-                return null;
-            }
-            File file = new File(dir, mediaId + ".mp4");
-            if (file.exists() && file.length() > 1024 && file.canRead()) {
-                Log.d(TAG, "Video already cached: " + file.getAbsolutePath() + ", Size: " + file.length() + " bytes");
+        for (int attempt = 0; attempt <= MAX_DOWNLOAD_RETRIES; attempt++) {
+            try {
+                File dir = new File(context.getFilesDir(), "videos");
+                if (!dir.exists() && !dir.mkdirs()) {
+                    Log.e(TAG, "Failed to create videos directory: " + dir.getAbsolutePath());
+                    return null;
+                }
+                File file = new File(dir, mediaId + ".mp4");
+                if (file.exists() && file.length() > 1024 && file.canRead()) {
+                    Log.d(TAG, "Video already cached: " + file.getAbsolutePath() + ", Size: " + file.length() + " bytes");
+                    return file.getAbsolutePath();
+                }
+
+                if (!isNetworkAvailable()) {
+                    Log.w(TAG, "No network available, cannot download video for media ID: " + mediaId + ", URL: " + url);
+                    return null;
+                }
+
+                Log.d(TAG, "Downloading video from: " + url + " for media ID: " + mediaId + ", Attempt: " + (attempt + 1));
+                Request request = new Request.Builder().url(url).build();
+                Response response = client.newCall(request).execute();
+                if (!response.isSuccessful()) {
+                    Log.e(TAG, "Failed to download video, HTTP code: " + response.code() + ", Message: " + response.message() + ", URL: " + url);
+                    response.close();
+                    continue;
+                }
+
+                byte[] bytes = response.body().bytes();
+                if (bytes.length < 1024) {
+                    Log.e(TAG, "Downloaded video too small: " + bytes.length + " bytes for media ID: " + mediaId + ", URL: " + url);
+                    response.close();
+                    continue;
+                }
+
+                FileOutputStream fos = new FileOutputStream(file);
+                fos.write(bytes);
+                fos.close();
+                response.close();
+                Log.d(TAG, "Downloaded video to: " + file.getAbsolutePath() + ", Size: " + file.length() + " bytes");
+
+                if (!file.canRead() || file.length() == 0) {
+                    Log.e(TAG, "Downloaded video is unreadable or empty: " + file.getAbsolutePath());
+                    return null;
+                }
+
                 return file.getAbsolutePath();
+            } catch (IOException e) {
+                Log.e(TAG, "Error downloading video for media ID: " + mediaId + ", URL: " + url + ", Attempt: " + (attempt + 1), e);
+                if (attempt < MAX_DOWNLOAD_RETRIES) {
+                    try {
+                        Thread.sleep(BASE_RETRY_DELAY_MS * (1 << attempt)); // Exponential backoff
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return null;
+                    }
+                }
             }
-
-            if (!isNetworkAvailable()) {
-                Log.w(TAG, "No network available, cannot download video for media ID: " + mediaId + ", URL: " + url);
-                return null;
-            }
-
-            Log.d(TAG, "Downloading video from: " + url + " for media ID: " + mediaId);
-            Request request = new Request.Builder().url(url).build();
-            Response response = client.newCall(request).execute();
-            if (!response.isSuccessful()) {
-                Log.e(TAG, "Failed to download video, HTTP code: " + response.code() + ", Message: " + response.message() + ", URL: " + url);
-                response.close();
-                return null;
-            }
-
-            byte[] bytes = response.body().bytes();
-            if (bytes.length < 1024) { // Minimum size threshold
-                Log.e(TAG, "Downloaded video too small: " + bytes.length + " bytes for media ID: " + mediaId + ", URL: " + url);
-                response.close();
-                return null;
-            }
-
-            FileOutputStream fos = new FileOutputStream(file);
-            fos.write(bytes);
-            fos.close();
-            response.close();
-            Log.d(TAG, "Downloaded video to: " + file.getAbsolutePath() + ", Size: " + file.length() + " bytes");
-
-            if (!file.canRead() || file.length() == 0) {
-                Log.e(TAG, "Downloaded video is unreadable or empty: " + file.getAbsolutePath());
-                return null;
-            }
-
-            return file.getAbsolutePath();
-        } catch (IOException e) {
-            Log.e(TAG, "Error downloading video for media ID: " + mediaId + ", URL: " + url, e);
-            return null;
         }
+        Log.e(TAG, "Failed to download video for media ID: " + mediaId + " after " + MAX_DOWNLOAD_RETRIES + " attempts");
+        return null;
     }
 
     private boolean isNetworkAvailable() {
@@ -224,7 +242,6 @@ public class MediaRepositoryImpl implements MediaRepository {
                 MediaEntity entity = item.media;
                 if (entity.localFilePath != null && !new File(entity.localFilePath).exists()) {
                     Log.w(TAG, "Cached file missing for media ID: " + entity.id + ", Local file path: " + entity.localFilePath);
-                    // Clear invalid localFilePath
                     entity.localFilePath = null;
                     mediaDao.insertAll(List.of(entity));
                     Log.d(TAG, "Cleared localFilePath for media ID: " + entity.id + ", Using remote URL: " + entity.url);

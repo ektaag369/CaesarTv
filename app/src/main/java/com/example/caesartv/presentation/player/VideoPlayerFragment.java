@@ -142,6 +142,13 @@ public class VideoPlayerFragment extends Fragment {
         }
     }
 
+    public void pauseVideo() {
+        if (player != null) {
+            player.setPlayWhenReady(false);
+            player.getPlaybackState(); // Keeps state without releasing
+        }
+    }
+
     @Override
     public void onDestroyView() {
         super.onDestroyView();
