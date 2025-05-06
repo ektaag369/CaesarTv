@@ -27,6 +27,7 @@ public class WebSocketDataSource {
     private static final String API_BASE_URL = "https://tvapi.afikgroup.com/media/getMedia/";
     private static final int MAX_RETRIES = 3;
     private static final long MEDIA_TIMEOUT_MS = 10000; // 10s timeout for media fetch
+    private static final long API_RETRY_DELAY_MS = 2000; // 2s delay for API retries
     private Socket socket;
     private int retryCount = 0;
     private final Context context;
@@ -83,7 +84,7 @@ public class WebSocketDataSource {
                     JSONObject data = (JSONObject) args[0];
                     String deviceId = data.optString("deviceId", getDeviceId());
                     Log.d(TAG, "Fetching media from API for deviceId: " + deviceId);
-                    fetchMediaFromApi(deviceId, listener);
+                    fetchMediaFromApiWithRetry(deviceId, listener, 0);
                 } catch (Exception e) {
                     Log.e(TAG, "Error processing registered_success", e);
                     onError.run();
@@ -122,7 +123,10 @@ public class WebSocketDataSource {
 
             socket.on("unblocked_device", args -> {
                 Log.d(TAG, "Device unblocked, fetching media");
-                fetchMediaFromApi(getDeviceId(), listener);
+                // Notify MainViewmodel to update isDeviceBlocked
+                onError.run(); // Temporarily trigger onError to reset blocked state
+                // Fetch media from API with retry
+                fetchMediaFromApiWithRetry(getDeviceId(), listener, 0);
             });
 
             socket.on(Socket.EVENT_CONNECT_ERROR, args -> {
@@ -143,15 +147,25 @@ public class WebSocketDataSource {
         }
     }
 
-    private void fetchMediaFromApi(String deviceId, OnMediaFetchedListener listener) {
+    private void fetchMediaFromApiWithRetry(String deviceId, OnMediaFetchedListener listener, int attempt) {
+        if (attempt >= MAX_RETRIES) {
+            Log.e(TAG, "Max retries reached for API fetch, deviceId: " + deviceId);
+            return;
+        }
+        if (!isNetworkAvailable()) {
+            Log.w(TAG, "No network available for API fetch, deviceId: " + deviceId);
+            retryApiFetch(deviceId, listener, attempt + 1);
+            return;
+        }
         try {
             String apiUrl = API_BASE_URL + deviceId + "?page=1&limit=10";
-            Log.d(TAG, "Fetching media from: " + apiUrl);
+            Log.d(TAG, "Fetching media from: " + apiUrl + ", attempt: " + (attempt + 1));
             Request request = new Request.Builder().url(apiUrl).build();
             Response response = client.newCall(request).execute();
             if (!response.isSuccessful()) {
-                Log.e(TAG, "Failed to fetch media from API, HTTP code: " + response.code());
+                Log.e(TAG, "Failed to fetch media from API, HTTP code: " + response.code() + ", attempt: " + (attempt + 1));
                 response.close();
+                retryApiFetch(deviceId, listener, attempt + 1);
                 return;
             }
             String json = response.body().string();
@@ -161,13 +175,27 @@ public class WebSocketDataSource {
             if (!mediaList.isEmpty()) {
                 socketHasReceivedMedia = true;
                 listener.onMediaFetched(mediaList);
-                Log.d(TAG, "Fetched " + mediaList.size() + " media items from API: " + getMediaIds(mediaList));
+                Log.d(TAG, "Successfully fetched " + mediaList.size() + " media items from API: " + getMediaIds(mediaList));
             } else {
-                Log.w(TAG, "No active media from API");
+                Log.w(TAG, "No active media from API, attempt: " + (attempt + 1));
+                retryApiFetch(deviceId, listener, attempt + 1);
             }
         } catch (Exception e) {
-            Log.e(TAG, "Error fetching media from API", e);
+            Log.e(TAG, "Error fetching media from API, attempt: " + (attempt + 1), e);
+            retryApiFetch(deviceId, listener, attempt + 1);
         }
+    }
+
+    private void retryApiFetch(String deviceId, OnMediaFetchedListener listener, int attempt) {
+        if (attempt >= MAX_RETRIES) {
+            Log.e(TAG, "Max API fetch retries reached for deviceId: " + deviceId);
+            return;
+        }
+        long delay = API_RETRY_DELAY_MS * (1 << (attempt - 1)); // Exponential backoff: 2s, 4s, 8s
+        Log.d(TAG, "Retrying API fetch, attempt " + attempt + "/" + MAX_RETRIES + ", delay: " + delay + "ms");
+        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+            fetchMediaFromApiWithRetry(deviceId, listener, attempt);
+        }, delay);
     }
 
     private List<MediaItem> parseApiResponse(JSONObject data) {

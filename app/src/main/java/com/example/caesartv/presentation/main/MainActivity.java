@@ -10,8 +10,10 @@ import android.widget.ImageView;
 import androidx.appcompat.app.AppCompatActivity;
 import com.example.caesartv.R;
 import com.example.caesartv.di.AppModule;
+import com.example.caesartv.domain.model.MediaItem;
 import com.example.caesartv.domain.usecase.GetCachedMediaUseCase;
 import com.example.caesartv.presentation.player.VideoPlayerFragment;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -26,6 +28,8 @@ public class MainActivity extends AppCompatActivity {
     private VideoPlayerFragment videoPlayerFragment;
     private ExecutorService executorService;
     private static final long MEDIA_CHECK_TIMEOUT_MS = 10000; // 10s timeout
+    private static final long BLOCKED_CLOSE_DELAY_MS = 3000; // 3s delay before closing
+    private boolean isDeviceBlocked = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -59,18 +63,49 @@ public class MainActivity extends AppCompatActivity {
             isSplashDisplayed = false;
             splashLogo.setVisibility(View.GONE);
             Log.d(TAG, "Splash screen hidden");
-            setContentView(R.layout.activity_main);
-            // Check block status
-            Boolean isBlocked = viewModel.getIsDeviceBlocked().getValue();
-            if (isBlocked != null && isBlocked) {
-                setContentView(R.layout.activity_blocked);
-                Log.w(TAG, "Device is blocked, showing blocked screen");
-                mainHandler.postDelayed(this::finish, 5000);
-            } else {
-                waitForMediaAndStartVideoPlayer();
-                observeViewModel();
-            }
+            handleDeviceBlockStatus();
         }, 5000);
+    }
+
+    private void handleDeviceBlockStatus() {
+        Boolean isBlocked = viewModel.getIsDeviceBlocked().getValue();
+        isDeviceBlocked = isBlocked != null && isBlocked;
+        if (isDeviceBlocked) {
+            setContentView(R.layout.activity_blocked);
+            Log.w(TAG, "Device is blocked, showing blocked screen");
+            // Remove VideoPlayerFragment if it exists
+            if (videoPlayerFragment != null && videoPlayerFragment.isAdded()) {
+                getSupportFragmentManager()
+                        .beginTransaction()
+                        .remove(videoPlayerFragment)
+                        .commit();
+                Log.d(TAG, "VideoPlayerFragment removed due to device block");
+            }
+            // Close app after 3 seconds
+            mainHandler.postDelayed(this::finish, BLOCKED_CLOSE_DELAY_MS);
+            Log.d(TAG, "Scheduled app closure in " + BLOCKED_CLOSE_DELAY_MS + "ms");
+        } else {
+            setContentView(R.layout.activity_main);
+            checkCachedMediaAndStartVideoPlayer();
+            observeViewModel();
+        }
+    }
+
+    private void checkCachedMediaAndStartVideoPlayer() {
+        Log.d(TAG, "Checking cached media");
+        executorService.execute(() -> {
+            List<MediaItem> cachedMedia = cachedMediaUseCase.execute();
+            mainHandler.post(() -> {
+                if (!cachedMedia.isEmpty()) {
+                    Log.d(TAG, "Cached media available: " + cachedMedia.size() + " items");
+                    viewModel.getMediaItems().postValue(cachedMedia);
+                    startVideoPlayer();
+                } else {
+                    Log.d(TAG, "No cached media, waiting for API media");
+                    waitForMediaAndStartVideoPlayer();
+                }
+            });
+        });
     }
 
     private void waitForMediaAndStartVideoPlayer() {
@@ -79,6 +114,10 @@ public class MainActivity extends AppCompatActivity {
         Runnable checkMedia = new Runnable() {
             @Override
             public void run() {
+                if (isDeviceBlocked) {
+                    Log.d(TAG, "Device is blocked, skipping media check");
+                    return;
+                }
                 if (viewModel.getMediaItems().getValue() != null && !viewModel.getMediaItems().getValue().isEmpty()) {
                     Log.d(TAG, "Media items available: " + viewModel.getMediaItems().getValue().size());
                     startVideoPlayer();
@@ -86,8 +125,8 @@ public class MainActivity extends AppCompatActivity {
                     Log.d(TAG, "No media yet, retrying...");
                     mainHandler.postDelayed(this, 500);
                 } else {
-                    Log.w(TAG, "Media fetch timeout, starting VideoPlayerFragment with no media");
-                    startVideoPlayer();
+                    Log.w(TAG, "Media fetch timeout, checking cached media");
+                    checkCachedMediaAndStartVideoPlayer();
                 }
             }
         };
@@ -97,30 +136,64 @@ public class MainActivity extends AppCompatActivity {
     private void observeViewModel() {
         viewModel.getMediaItems().observe(this, mediaItems -> {
             Log.d(TAG, "mediaItems received: " + (mediaItems != null ? mediaItems.size() : "null"));
-            if (mediaItems != null && !mediaItems.isEmpty() && !isSplashDisplayed) {
-                Log.d(TAG, "Media items received, VideoPlayerFragment already started or will start");
+            if (mediaItems != null && !mediaItems.isEmpty() && !isSplashDisplayed && !isDeviceBlocked) {
+                Log.d(TAG, "Media items received, starting VideoPlayerFragment");
+                startVideoPlayer();
             } else {
-                Log.d(TAG, "No media items available or splash screen still displayed");
+                Log.d(TAG, "No media items, splash screen displayed, or device blocked");
             }
         });
 
         viewModel.getIsDeviceBlocked().observe(this, isBlocked -> {
             Log.d(TAG, "isDeviceBlocked: " + isBlocked);
-            if (isBlocked != null && isBlocked && !isSplashDisplayed) {
-                setContentView(R.layout.activity_blocked);
-                Log.w(TAG, "Device is blocked, showing blocked screen");
-                mainHandler.postDelayed(this::finish, 5000);
+            boolean newBlockStatus = isBlocked != null && isBlocked;
+            if (newBlockStatus != isDeviceBlocked) {
+                isDeviceBlocked = newBlockStatus;
+                if (isDeviceBlocked) {
+                    setContentView(R.layout.activity_blocked);
+                    Log.w(TAG, "Device is blocked, showing blocked screen");
+                    // Stop and remove VideoPlayerFragment
+                    if (videoPlayerFragment != null && videoPlayerFragment.isAdded()) {
+                        videoPlayerFragment.pauseVideo();
+                        getSupportFragmentManager()
+                                .beginTransaction()
+                                .remove(videoPlayerFragment)
+                                .commit();
+                        Log.d(TAG, "VideoPlayerFragment paused and removed due to device block");
+                    }
+                    // Close app after 3 seconds
+                    mainHandler.postDelayed(this::finish, BLOCKED_CLOSE_DELAY_MS);
+                    Log.d(TAG, "Scheduled app closure in " + BLOCKED_CLOSE_DELAY_MS + "ms");
+                } else {
+                    setContentView(R.layout.activity_main);
+                    Log.d(TAG, "Device unblocked, resuming normal flow");
+                    // Reinitialize VideoPlayerFragment and force media check
+                    videoPlayerFragment = new VideoPlayerFragment();
+                    checkCachedMediaAndStartVideoPlayer();
+                }
             }
         });
     }
 
     private void startVideoPlayer() {
+        if (isDeviceBlocked) {
+            Log.d(TAG, "Device is blocked, not starting video player");
+            return;
+        }
         Log.d(TAG, "Starting video player");
-        getSupportFragmentManager()
-                .beginTransaction()
-                .replace(R.id.main_browse_fragment, videoPlayerFragment)
-                .commit();
-        Log.d(TAG, "Fragment transaction committed");
+        if (videoPlayerFragment == null || videoPlayerFragment.isDetached()) {
+            videoPlayerFragment = new VideoPlayerFragment();
+            Log.d(TAG, "Created new VideoPlayerFragment instance");
+        }
+        if (!videoPlayerFragment.isAdded()) {
+            getSupportFragmentManager()
+                    .beginTransaction()
+                    .replace(R.id.main_browse_fragment, videoPlayerFragment)
+                    .commitAllowingStateLoss(); // Use commitAllowingStateLoss to avoid IllegalStateException
+            Log.d(TAG, "Fragment transaction committed");
+        } else {
+            Log.d(TAG, "VideoPlayerFragment already added");
+        }
     }
 
     public GetCachedMediaUseCase getCachedMediaUseCase() {

@@ -44,7 +44,7 @@ public class MainViewmodel extends ViewModel {
         connectWebSocket(0);
     }
 
-    public LiveData<List<MediaItem>> getMediaItems() {
+    public MutableLiveData<List<MediaItem>> getMediaItems() {
         return mediaItems;
     }
 
@@ -56,19 +56,22 @@ public class MainViewmodel extends ViewModel {
         connectWebSocket(0);
     }
 
-    private void connectWebSocket(int retryCount) {
+    public void connectWebSocket(int retryCount) {
         if (isWebSocketConnected || retryCount > MAX_RETRIES) {
             if (!isWebSocketConnected) {
                 Log.w(TAG, "Max retries reached, using cached media");
+                isDeviceBlocked.postValue(false); // Reset blocked state on max retries
             }
             return;
         }
         if (!isNetworkAvailable()) {
             Log.w(TAG, "No network available, using cached media");
+            isDeviceBlocked.postValue(false); // Reset blocked state on no network
             return;
         }
         if (executorService.isShutdown()) {
             Log.w(TAG, "ExecutorService is shutdown, cannot initialize WebSocket");
+            isDeviceBlocked.postValue(false); // Reset blocked state on shutdown
             return;
         }
         isWebSocketConnected = true;
@@ -78,6 +81,7 @@ public class MainViewmodel extends ViewModel {
                         if (!executorService.isShutdown()) {
                             executorService.execute(() -> {
                                 mediaItems.postValue(mediaList);
+                                isDeviceBlocked.postValue(false); // Ensure unblocked on successful fetch
                                 Log.d(TAG, "WebSocket fetched and updated DB with " + mediaList.size() + " media items");
                             });
                         }
@@ -95,6 +99,7 @@ public class MainViewmodel extends ViewModel {
                         if (!executorService.isShutdown()) {
                             executorService.execute(() -> {
                                 Log.w(TAG, "WebSocket error, retrying (" + (retryCount + 1) + "/" + MAX_RETRIES + ")");
+                                isDeviceBlocked.postValue(false); // Reset blocked state on error
                                 isWebSocketConnected = false;
                                 try {
                                     Thread.sleep(RETRY_DELAY_MS);
