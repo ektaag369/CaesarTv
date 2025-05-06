@@ -94,7 +94,7 @@ public class MediaRepositoryImpl implements MediaRepository {
             Log.d(TAG, "Cached media ID: " + mediaItem.getId() + ", URL: " + mediaItem.getUrl() + ", Local file path: " + mediaItem.getLocalFilePath());
             mediaItems.add(mediaItem);
         }
-        Log.d(TAG, "Fetched " + mediaItems.size() + " cached media items");
+        Log.d(TAG, "Fetched db size" + mediaItems.size() + " cached media items");
         return mediaItems;
     }
 

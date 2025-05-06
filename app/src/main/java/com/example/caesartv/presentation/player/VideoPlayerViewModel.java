@@ -12,6 +12,8 @@ import androidx.lifecycle.ViewModel;
 import androidx.lifecycle.ViewModelProvider;
 import com.example.caesartv.domain.model.MediaItem;
 import com.example.caesartv.domain.usecase.GetCachedMediaUseCase;
+
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -61,13 +63,8 @@ public class VideoPlayerViewModel extends ViewModel {
             currentMedia.setValue(null);
             return;
         }
-        if (isOffline && currentMediaIndex > 0) {
-            Log.d(TAG, "Offline mode, one video already played, closing app");
-            currentMedia.setValue(null);
-            return;
-        }
         MediaItem media = mediaList.get(currentMediaIndex);
-        Log.d(TAG, "Playing media: " + media.getTitle() + ", index: " + currentMediaIndex + ", localPath: " + (media.getLocalFilePath() != null ? media.getLocalFilePath() : media.getUrl()));
+        Log.d(TAG, "Playing media: " + media.getTitle() + ", index: " + currentMediaIndex + ", localPath: " + (media.getLocalFilePath() != null ? media.getLocalFilePath() : media.getUrl()) + ", exists: " + (media.getLocalFilePath() != null && new File(media.getLocalFilePath()).exists()));
         currentMedia.setValue(media);
         currentMediaIndex++;
     }
