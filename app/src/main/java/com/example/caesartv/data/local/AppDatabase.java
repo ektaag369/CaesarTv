@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase;
 import androidx.room.migration.Migration;
 import androidx.sqlite.db.SupportSQLiteDatabase;
 
-@Database(entities = {MediaEntity.class, MediaUrlEntity.class}, version = 5, exportSchema = false)
+@Database(entities = {MediaEntity.class, MediaUrlEntity.class}, version = 6, exportSchema = false)
 public abstract class AppDatabase extends RoomDatabase {
     public abstract MediaDao mediaDao();
 
@@ -19,7 +19,7 @@ public abstract class AppDatabase extends RoomDatabase {
                 if (INSTANCE == null) {
                     INSTANCE = Room.databaseBuilder(context.getApplicationContext(),
                                     AppDatabase.class, "caesartv_database")
-                            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                             .build();
                 }
             }
@@ -81,6 +81,13 @@ public abstract class AppDatabase extends RoomDatabase {
                     "url TEXT, " +
                     "id TEXT, " +
                     "FOREIGN KEY(mediaId) REFERENCES media(id) ON DELETE CASCADE)");
+        }
+    };
+
+    public static final Migration MIGRATION_5_6 = new Migration(5, 6) {
+        @Override
+        public void migrate(SupportSQLiteDatabase database) {
+            database.execSQL("ALTER TABLE media_url ADD COLUMN localFilePath TEXT");
         }
     };
 }

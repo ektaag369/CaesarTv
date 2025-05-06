@@ -66,8 +66,15 @@ public class MediaRepositoryImpl implements MediaRepository {
                                 String finalFilePath = localFilePath != null ? localFilePath : item.getUrl();
                                 Log.d(TAG, "Saving media ID: " + item.getId() + " with final file path: " + finalFilePath);
                                 entities.add(toEntity(item, finalFilePath));
+
+                                // Download videos in multipleUrl for MULTIPLE media
                                 for (MediaUrl url : item.getMultipleUrl()) {
-                                    urlEntities.add(new MediaUrlEntity(url.getUrlType(), url.getUrl(), url.getId(), item.getId()));
+                                    String urlLocalFilePath = null;
+                                    if ("video".equals(url.getUrlType())) {
+                                        urlLocalFilePath = downloadVideo(url.getUrl(), url.getId());
+                                        Log.d(TAG, "Downloaded multipleUrl video for ID: " + url.getId() + ", Local path: " + urlLocalFilePath);
+                                    }
+                                    urlEntities.add(new MediaUrlEntity(url.getUrlType(), url.getUrl(), url.getId(), item.getId(), urlLocalFilePath));
                                 }
                             }
                             mediaDao.insertAll(entities);
@@ -138,11 +145,12 @@ public class MediaRepositoryImpl implements MediaRepository {
         List<MediaUrl> urls = new ArrayList<>();
         if (mediaWithUrls.urls != null) {
             for (MediaUrlEntity urlEntity : mediaWithUrls.urls) {
-                urls.add(new MediaUrl(urlEntity.urlType, urlEntity.url, urlEntity.id));
+                urls.add(new MediaUrl(urlEntity.urlType, urlEntity.url, urlEntity.id, urlEntity.localFilePath));
             }
         }
+        // For MULTIPLE media, url may be null; use localFilePath if available, otherwise null
         String finalUrl = entity.localFilePath != null && !entity.localFilePath.isEmpty() && new File(entity.localFilePath).exists() ? entity.localFilePath : entity.url;
-        Log.d(TAG, "Mapping MediaEntity to MediaItem, ID: " + entity.id + ", Selected URL: " + finalUrl + ", Local file exists: " + (finalUrl.equals(entity.localFilePath) ? "yes" : "no"));
+        Log.d(TAG, "Mapping MediaEntity to MediaItem, ID: " + entity.id + ", Selected URL: " + (finalUrl != null ? finalUrl : "null") + ", Local file exists: " + (entity.localFilePath != null && new File(entity.localFilePath).exists() ? "yes" : "no"));
         MediaItem mediaItem = new MediaItem(
                 entity.id,
                 entity.title,
@@ -245,6 +253,15 @@ public class MediaRepositoryImpl implements MediaRepository {
                     entity.localFilePath = null;
                     mediaDao.insertAll(List.of(entity));
                     Log.d(TAG, "Cleared localFilePath for media ID: " + entity.id + ", Using remote URL: " + entity.url);
+                }
+                // Verify multipleUrl local files
+                for (MediaUrlEntity urlEntity : item.urls) {
+                    if (urlEntity.localFilePath != null && !new File(urlEntity.localFilePath).exists()) {
+                        Log.w(TAG, "Cached file missing for media URL ID: " + urlEntity.id + ", Local file path: " + urlEntity.localFilePath);
+                        urlEntity.localFilePath = null;
+                        mediaDao.insertUrls(List.of(urlEntity));
+                        Log.d(TAG, "Cleared localFilePath for media URL ID: " + urlEntity.id);
+                    }
                 }
             }
         });

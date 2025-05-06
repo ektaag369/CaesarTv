@@ -37,7 +37,7 @@ public class VideoPlayerViewModel extends ViewModel {
         loadCachedMedia();
     }
 
-    private void loadCachedMedia() {
+    public void loadCachedMedia() {
         executor.execute(() -> {
             try {
                 mediaList = getCachedMediaUseCase.execute();
@@ -52,15 +52,15 @@ public class VideoPlayerViewModel extends ViewModel {
 
     public void playNextVideo() {
         if (mediaList.isEmpty()) {
-            Log.w(TAG, "No media items to play");
-            currentMedia.setValue(null);
+            Log.w(TAG, "No media items to play, closing app");
+            mainHandler.post(() -> currentMedia.setValue(null));
             return;
         }
         boolean isOffline = !isNetworkAvailable();
         Log.d(TAG, "Playing video, isOffline: " + isOffline + ", currentMediaIndex: " + currentMediaIndex + ", mediaList size: " + mediaList.size());
         if (currentMediaIndex >= mediaList.size()) {
             Log.d(TAG, "All videos played, closing app");
-            currentMedia.setValue(null);
+            mainHandler.post(() -> currentMedia.setValue(null));
             return;
         }
         MediaItem media = mediaList.get(currentMediaIndex);
@@ -71,8 +71,8 @@ public class VideoPlayerViewModel extends ViewModel {
 
     public void handleVideoEnd() {
         if (mediaList.isEmpty()) {
-            Log.w(TAG, "No media to handle");
-            currentMedia.setValue(null);
+            Log.w(TAG, "No media to handle, closing app");
+            mainHandler.post(() -> currentMedia.setValue(null));
             return;
         }
         if (currentMediaIndex == 0) {

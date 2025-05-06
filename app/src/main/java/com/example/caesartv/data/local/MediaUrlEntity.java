@@ -16,11 +16,13 @@ public class MediaUrlEntity {
     public String urlType;
     public String url;
     public String id;
+    public String localFilePath; // New field for local file path
 
-    public MediaUrlEntity(String urlType, String url, String id, String mediaId) {
+    public MediaUrlEntity(String urlType, String url, String id, String mediaId, String localFilePath) {
         this.urlType = urlType;
         this.url = url;
         this.id = id;
         this.mediaId = mediaId;
+        this.localFilePath = localFilePath;
     }
 }

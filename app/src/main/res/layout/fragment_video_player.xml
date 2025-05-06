@@ -3,11 +3,68 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
+    <!-- Full-screen PlayerView for SINGLE media -->
     <androidx.media3.ui.PlayerView
-        android:id="@+id/video_view"
+        android:id="@+id/video_view_full"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="@android:color/black" />
+        android:visibility="gone" />
+
+    <!-- Split-screen layout for MULTIPLE media -->
+    <LinearLayout
+        android:id="@+id/split_screen_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="horizontal"
+        android:visibility="gone">
+
+        <!-- Left half -->
+        <FrameLayout
+            android:id="@+id/left_container"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1">
+
+            <androidx.media3.ui.PlayerView
+                android:id="@+id/video_view_left"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="gone" />
+
+            <ImageView
+                android:id="@+id/image_view_left"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:scaleType="centerCrop"
+                android:visibility="gone" />
+
+        </FrameLayout>
+
+        <!-- Right half -->
+        <FrameLayout
+            android:id="@+id/right_container"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1">
+
+            <androidx.media3.ui.PlayerView
+                android:id="@+id/video_view_right"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:visibility="gone" />
+
+            <ImageView
+                android:id="@+id/image_view_right"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:scaleType="centerCrop"
+                android:visibility="gone" />
+
+        </FrameLayout>
+
+    </LinearLayout>
+
+    <!-- Loading spinner -->
     <ProgressBar
         android:id="@+id/loading_spinner"
         android:layout_width="wrap_content"
