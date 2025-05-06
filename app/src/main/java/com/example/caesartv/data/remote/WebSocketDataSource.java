@@ -16,18 +16,30 @@ import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
 
 public class WebSocketDataSource {
 
     private static final String TAG = "WebSocketDataSource";
     private static final String WEBSOCKET_URL = "wss://tvapi.afikgroup.com/";
+    private static final String API_BASE_URL = "https://tvapi.afikgroup.com/media/getMedia/";
     private static final int MAX_RETRIES = 3;
+    private static final long MEDIA_TIMEOUT_MS = 10000; // 10s timeout for media fetch
     private Socket socket;
     private int retryCount = 0;
     private final Context context;
+    private boolean socketHasReceivedMedia = false;
+    private final OkHttpClient client;
 
     public WebSocketDataSource(Context context) {
         this.context = context.getApplicationContext();
+        this.client = new OkHttpClient.Builder()
+                .connectTimeout(30, TimeUnit.SECONDS)
+                .readTimeout(120, TimeUnit.SECONDS)
+                .writeTimeout(120, TimeUnit.SECONDS)
+                .build();
     }
 
     public void connect(OnMediaFetchedListener listener, Runnable onBlocked, Runnable onError) {
@@ -44,13 +56,21 @@ public class WebSocketDataSource {
 
             socket.on(Socket.EVENT_CONNECT, args -> {
                 Log.d(TAG, "WebSocket connected");
-                retryCount = 0; // Reset retry count on successful connection
+                retryCount = 0;
+                socketHasReceivedMedia = false;
                 JSONObject deviceInfo = new JSONObject();
                 try {
                     deviceInfo.put("deviceId", getDeviceId());
                     deviceInfo.put("deviceName", getDeviceName());
                     socket.emit("register_tv", deviceInfo);
                     Log.d(TAG, "Emitted register_tv with deviceInfo: " + deviceInfo);
+                    // Schedule timeout for media fetch
+                    new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                        if (socket != null && socket.connected() && !socketHasReceivedMedia) {
+                            Log.w(TAG, "Timeout waiting for media");
+                            onError.run();
+                        }
+                    }, MEDIA_TIMEOUT_MS);
                 } catch (Exception e) {
                     Log.e(TAG, "Error emitting register_tv", e);
                     onError.run();
@@ -62,7 +82,8 @@ public class WebSocketDataSource {
                 try {
                     JSONObject data = (JSONObject) args[0];
                     String deviceId = data.optString("deviceId", getDeviceId());
-                    Log.d(TAG, "Waiting for latest_all_media for deviceId: " + deviceId);
+                    Log.d(TAG, "Fetching media from API for deviceId: " + deviceId);
+                    fetchMediaFromApi(deviceId, listener);
                 } catch (Exception e) {
                     Log.e(TAG, "Error processing registered_success", e);
                     onError.run();
@@ -75,13 +96,15 @@ public class WebSocketDataSource {
             });
 
             socket.on("latest_all_media", args -> {
+                socketHasReceivedMedia = true;
                 Log.d(TAG, "Received latest_all_media, raw response: " + args[0]);
                 try {
                     JSONObject data = (JSONObject) args[0];
                     List<MediaItem> mediaList = parseMediaData(data);
                     if (!mediaList.isEmpty()) {
                         listener.onMediaFetched(mediaList);
-                        Log.d(TAG, "Fetched " + mediaList.size() + " media items from latest_all_media");
+                        Log.d(TAG, "Fetched " + mediaList.size() + " media items from latest_all_media: " +
+                                getMediaIds(mediaList));
                     } else {
                         Log.w(TAG, "No active media in latest_all_media");
                         onError.run();
@@ -98,7 +121,8 @@ public class WebSocketDataSource {
             });
 
             socket.on("unblocked_device", args -> {
-                Log.d(TAG, "Device unblocked, waiting for latest_all_media");
+                Log.d(TAG, "Device unblocked, fetching media");
+                fetchMediaFromApi(getDeviceId(), listener);
             });
 
             socket.on(Socket.EVENT_CONNECT_ERROR, args -> {
@@ -119,27 +143,51 @@ public class WebSocketDataSource {
         }
     }
 
-    private List<MediaItem> parseMediaData(JSONObject data) {
+    private void fetchMediaFromApi(String deviceId, OnMediaFetchedListener listener) {
+        try {
+            String apiUrl = API_BASE_URL + deviceId + "?page=1&limit=10";
+            Log.d(TAG, "Fetching media from: " + apiUrl);
+            Request request = new Request.Builder().url(apiUrl).build();
+            Response response = client.newCall(request).execute();
+            if (!response.isSuccessful()) {
+                Log.e(TAG, "Failed to fetch media from API, HTTP code: " + response.code());
+                response.close();
+                return;
+            }
+            String json = response.body().string();
+            response.close();
+            JSONObject jsonObject = new JSONObject(json);
+            List<MediaItem> mediaList = parseApiResponse(jsonObject);
+            if (!mediaList.isEmpty()) {
+                socketHasReceivedMedia = true;
+                listener.onMediaFetched(mediaList);
+                Log.d(TAG, "Fetched " + mediaList.size() + " media items from API: " + getMediaIds(mediaList));
+            } else {
+                Log.w(TAG, "No active media from API");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error fetching media from API", e);
+        }
+    }
+
+    private List<MediaItem> parseApiResponse(JSONObject data) {
         List<MediaItem> mediaList = new ArrayList<>();
         try {
+            String status = data.optString("status", "");
+            if (!"success".equals(status)) {
+                Log.w(TAG, "API response status is not success: " + status);
+                return mediaList;
+            }
             JSONObject outerData = data.optJSONObject("data");
             if (outerData == null) {
-                Log.w(TAG, "No 'data' field in response");
+                Log.w(TAG, "No 'data' field in API response");
                 return mediaList;
             }
-
-            JSONObject innerData = outerData.optJSONObject("data");
-            if (innerData == null) {
-                Log.w(TAG, "No 'data.data' field in response");
-                return mediaList;
-            }
-
-            JSONArray mediaAllData = innerData.optJSONArray("mediaAllData");
+            JSONArray mediaAllData = outerData.optJSONArray("mediaAllData");
             if (mediaAllData == null) {
-                Log.w(TAG, "No 'data.data.mediaAllData' field in response");
+                Log.w(TAG, "No 'data.mediaAllData' field in API response");
                 return mediaList;
             }
-
             for (int i = 0; i < mediaAllData.length(); i++) {
                 JSONObject item = mediaAllData.getJSONObject(i);
                 JSONArray multipleUrlArray = item.optJSONArray("multipleUrl");
@@ -170,11 +218,68 @@ public class WebSocketDataSource {
                 );
                 if (media.isActive()) {
                     mediaList.add(media);
-                    Log.d(TAG, "Added active media: " + media.getTitle() + ", URL: " + media.getUrl() + ", Duration: " + media.getDuration());
+                    Log.d(TAG, "Added active media from API: " + media.getTitle() + ", URL: " + media.getUrl() + ", Duration: " + media.getDuration());
                 }
             }
         } catch (Exception e) {
-            Log.e(TAG, "Error parsing media data", e);
+            Log.e(TAG, "Error parsing API response", e);
+        }
+        return mediaList;
+    }
+
+    private List<MediaItem> parseMediaData(JSONObject data) {
+        List<MediaItem> mediaList = new ArrayList<>();
+        try {
+            JSONObject outerData = data.optJSONObject("data");
+            if (outerData == null) {
+                Log.w(TAG, "No 'data' field in latest_all_media response");
+                return mediaList;
+            }
+            JSONObject innerData = outerData.optJSONObject("data");
+            if (innerData == null) {
+                Log.w(TAG, "No 'data.data' field in latest_all_media response");
+                return mediaList;
+            }
+            JSONArray mediaAllData = innerData.optJSONArray("mediaAllData");
+            if (mediaAllData == null) {
+                Log.w(TAG, "No 'data.data.mediaAllData' field in latest_all_media response");
+                return mediaList;
+            }
+            for (int i = 0; i < mediaAllData.length(); i++) {
+                JSONObject item = mediaAllData.getJSONObject(i);
+                JSONArray multipleUrlArray = item.optJSONArray("multipleUrl");
+                List<MediaUrl> multipleUrl = new ArrayList<>();
+                if (multipleUrlArray != null) {
+                    for (int j = 0; j < multipleUrlArray.length(); j++) {
+                        JSONObject urlItem = multipleUrlArray.getJSONObject(j);
+                        multipleUrl.add(new MediaUrl(
+                                urlItem.optString("urlType", ""),
+                                urlItem.optString("url", ""),
+                                urlItem.optString("_id", "")
+                        ));
+                    }
+                }
+                MediaItem media = new MediaItem(
+                        item.optString("_id", ""),
+                        item.optString("title", ""),
+                        item.optString("description", ""),
+                        item.optString("mediaType", ""),
+                        item.optString("url", null),
+                        multipleUrl,
+                        item.optString("thumbnailUrl", null),
+                        item.optInt("duration", 0),
+                        item.optInt("displayOrder", 0),
+                        item.optBoolean("isActive", false),
+                        item.optString("createdAt", ""),
+                        item.optString("updatedAt", "")
+                );
+                if (media.isActive()) {
+                    mediaList.add(media);
+                    Log.d(TAG, "Added active media from latest_all_media: " + media.getTitle() + ", URL: " + media.getUrl() + ", Duration: " + media.getDuration());
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error parsing latest_all_media data", e);
         }
         return mediaList;
     }
@@ -219,6 +324,14 @@ public class WebSocketDataSource {
         String deviceName = manufacturer + " " + model;
         Log.d(TAG, "Device Name: " + deviceName);
         return deviceName != null && !deviceName.trim().isEmpty() ? deviceName : "Unknown Device";
+    }
+
+    private List<String> getMediaIds(List<MediaItem> mediaItems) {
+        List<String> ids = new ArrayList<>();
+        for (MediaItem item : mediaItems) {
+            ids.add(item.getId());
+        }
+        return ids;
     }
 
     public interface OnMediaFetchedListener {
