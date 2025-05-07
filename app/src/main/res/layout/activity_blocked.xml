@@ -9,7 +9,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_centerInParent="true"
-        android:text="This device is blocked, please contact admin. The app will closed automatically."
+        android:text="This device is blocked, please contact admin. The app will closed after 3 seconds."
         android:textColor="@android:color/white"
         android:textSize="24sp"
         android:gravity="center"

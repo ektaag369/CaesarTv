@@ -39,7 +39,6 @@ public class MainViewmodel extends ViewModel {
         this.context = context;
         this.executorService = executorService;
         setupNetworkCallback();
-        // Check cached media first, then try WebSocket
         checkCachedMedia();
         connectWebSocket(0);
     }
@@ -60,18 +59,18 @@ public class MainViewmodel extends ViewModel {
         if (isWebSocketConnected || retryCount > MAX_RETRIES) {
             if (!isWebSocketConnected) {
                 Log.w(TAG, "Max retries reached, using cached media");
-                isDeviceBlocked.postValue(false); // Reset blocked state on max retries
+                isDeviceBlocked.postValue(false);
             }
             return;
         }
         if (!isNetworkAvailable()) {
             Log.w(TAG, "No network available, using cached media");
-            isDeviceBlocked.postValue(false); // Reset blocked state on no network
+            isDeviceBlocked.postValue(false);
             return;
         }
         if (executorService.isShutdown()) {
             Log.w(TAG, "ExecutorService is shutdown, cannot initialize WebSocket");
-            isDeviceBlocked.postValue(false); // Reset blocked state on shutdown
+            isDeviceBlocked.postValue(false);
             return;
         }
         isWebSocketConnected = true;
@@ -81,7 +80,7 @@ public class MainViewmodel extends ViewModel {
                         if (!executorService.isShutdown()) {
                             executorService.execute(() -> {
                                 mediaItems.postValue(mediaList);
-                                isDeviceBlocked.postValue(false); // Ensure unblocked on successful fetch
+                                isDeviceBlocked.postValue(false);
                                 Log.d(TAG, "WebSocket fetched and updated DB with " + mediaList.size() + " media items");
                             });
                         }
@@ -99,7 +98,7 @@ public class MainViewmodel extends ViewModel {
                         if (!executorService.isShutdown()) {
                             executorService.execute(() -> {
                                 Log.w(TAG, "WebSocket error, retrying (" + (retryCount + 1) + "/" + MAX_RETRIES + ")");
-                                isDeviceBlocked.postValue(false); // Reset blocked state on error
+                                isDeviceBlocked.postValue(false);
                                 isWebSocketConnected = false;
                                 try {
                                     Thread.sleep(RETRY_DELAY_MS);
@@ -200,6 +199,17 @@ public class MainViewmodel extends ViewModel {
             cm.unregisterNetworkCallback(networkCallback);
             networkCallback = null;
         }
+        if (!executorService.isShutdown()) {
+            executorService.shutdownNow();
+            try {
+                if (!executorService.awaitTermination(1, TimeUnit.SECONDS)) {
+                    Log.w(TAG, "ExecutorService did not terminate");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        Log.d(TAG, "ViewModel cleared, resources released");
     }
 
     public static class Factory extends ViewModelProvider.NewInstanceFactory {

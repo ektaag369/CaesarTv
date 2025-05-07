@@ -1,6 +1,7 @@
 package com.example.caesartv.data.repository;
 
 import android.content.Context;
+import android.media.MediaMetadataRetriever;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.util.Log;
@@ -185,7 +186,12 @@ public class MediaRepositoryImpl implements MediaRepository {
                 File file = new File(dir, mediaId + ".mp4");
                 if (file.exists() && file.length() > 1024 && file.canRead()) {
                     Log.d(TAG, "Video already cached: " + file.getAbsolutePath() + ", Size: " + file.length() + " bytes");
-                    return file.getAbsolutePath();
+                    if (isValidVideoFile(file)) {
+                        return file.getAbsolutePath();
+                    } else {
+                        Log.w(TAG, "Cached video is invalid, deleting and re-downloading: " + file.getAbsolutePath());
+                        file.delete();
+                    }
                 }
 
                 if (!isNetworkAvailable()) {
@@ -215,8 +221,9 @@ public class MediaRepositoryImpl implements MediaRepository {
                 response.close();
                 Log.d(TAG, "Downloaded video to: " + file.getAbsolutePath() + ", Size: " + file.length() + " bytes");
 
-                if (!file.canRead() || file.length() == 0) {
-                    Log.e(TAG, "Downloaded video is unreadable or empty: " + file.getAbsolutePath());
+                if (!file.canRead() || file.length() == 0 || !isValidVideoFile(file)) {
+                    Log.e(TAG, "Downloaded video is unreadable, empty, or invalid: " + file.getAbsolutePath());
+                    file.delete();
                     return null;
                 }
 
@@ -225,7 +232,7 @@ public class MediaRepositoryImpl implements MediaRepository {
                 Log.e(TAG, "Error downloading video for media ID: " + mediaId + ", URL: " + url + ", Attempt: " + (attempt + 1), e);
                 if (attempt < MAX_DOWNLOAD_RETRIES) {
                     try {
-                        Thread.sleep(BASE_RETRY_DELAY_MS * (1 << attempt)); // Exponential backoff
+                        Thread.sleep(BASE_RETRY_DELAY_MS * (1 << attempt));
                     } catch (InterruptedException ie) {
                         Thread.currentThread().interrupt();
                         return null;
@@ -235,6 +242,21 @@ public class MediaRepositoryImpl implements MediaRepository {
         }
         Log.e(TAG, "Failed to download video for media ID: " + mediaId + " after " + MAX_DOWNLOAD_RETRIES + " attempts");
         return null;
+    }
+
+    private boolean isValidVideoFile(File file) {
+        try {
+            MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+            retriever.setDataSource(file.getAbsolutePath());
+            String duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
+            retriever.release();
+            boolean isValid = duration != null && Long.parseLong(duration) > 0;
+            Log.d(TAG, "Video file validation: " + file.getAbsolutePath() + ", Valid: " + isValid);
+            return isValid;
+        } catch (Exception e) {
+            Log.e(TAG, "Invalid video file: " + file.getAbsolutePath(), e);
+            return false;
+        }
     }
 
     private boolean isNetworkAvailable() {
@@ -248,19 +270,18 @@ public class MediaRepositoryImpl implements MediaRepository {
             List<MediaWithUrls> mediaWithUrls = mediaDao.getAllMedia();
             for (MediaWithUrls item : mediaWithUrls) {
                 MediaEntity entity = item.media;
-                if (entity.localFilePath != null && !new File(entity.localFilePath).exists()) {
-                    Log.w(TAG, "Cached file missing for media ID: " + entity.id + ", Local file path: " + entity.localFilePath);
+                if (entity.localFilePath != null && !isValidVideoFile(new File(entity.localFilePath))) {
+                    Log.w(TAG, "Invalid or missing cached file for media ID: " + entity.id + ", Path: " + entity.localFilePath);
                     entity.localFilePath = null;
                     mediaDao.insertAll(List.of(entity));
-                    Log.d(TAG, "Cleared localFilePath for media ID: " + entity.id + ", Using remote URL: " + entity.url);
+                    Log.d(TAG, "Cleared invalid localFilePath for media ID: " + entity.id);
                 }
-                // Verify multipleUrl local files
                 for (MediaUrlEntity urlEntity : item.urls) {
-                    if (urlEntity.localFilePath != null && !new File(urlEntity.localFilePath).exists()) {
-                        Log.w(TAG, "Cached file missing for media URL ID: " + urlEntity.id + ", Local file path: " + urlEntity.localFilePath);
+                    if (urlEntity.localFilePath != null && !isValidVideoFile(new File(urlEntity.localFilePath))) {
+                        Log.w(TAG, "Invalid or missing cached file for media URL ID: " + urlEntity.id + ", Path: " + urlEntity.localFilePath);
                         urlEntity.localFilePath = null;
                         mediaDao.insertUrls(List.of(urlEntity));
-                        Log.d(TAG, "Cleared localFilePath for media URL ID: " + urlEntity.id);
+                        Log.d(TAG, "Cleared invalid localFilePath for media URL ID: " + urlEntity.id);
                     }
                 }
             }

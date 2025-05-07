@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 public class VideoPlayerViewModel extends ViewModel {
 
@@ -58,31 +59,46 @@ public class VideoPlayerViewModel extends ViewModel {
         }
         boolean isOffline = !isNetworkAvailable();
         Log.d(TAG, "Playing video, isOffline: " + isOffline + ", currentMediaIndex: " + currentMediaIndex + ", mediaList size: " + mediaList.size());
+
+        // Check if we've played all media items
         if (currentMediaIndex >= mediaList.size()) {
-            Log.d(TAG, "All videos played, closing app");
+            Log.d(TAG, "All media items played, closing app");
             mainHandler.post(() -> currentMedia.setValue(null));
             return;
         }
+
         MediaItem media = mediaList.get(currentMediaIndex);
         Log.d(TAG, "Playing media: " + media.getTitle() + ", index: " + currentMediaIndex + ", localPath: " + (media.getLocalFilePath() != null ? media.getLocalFilePath() : media.getUrl()) + ", exists: " + (media.getLocalFilePath() != null && new File(media.getLocalFilePath()).exists()));
         currentMedia.setValue(media);
         currentMediaIndex++;
     }
 
-    public void handleVideoEnd() {
+    public void retryCurrentMedia() {
+        if (mediaList.isEmpty() || currentMediaIndex == 0) {
+            Log.w(TAG, "No media to retry");
+            handleVideoEnd();
+            return;
+        }
+        MediaItem media = mediaList.get(currentMediaIndex - 1);
+        Log.d(TAG, "Retrying media: " + media.getTitle() + ", index: " + (currentMediaIndex - 1));
+        mainHandler.post(() -> currentMedia.setValue(media));
+    }
+
+    public Throwable handleVideoEnd() {
         if (mediaList.isEmpty()) {
             Log.w(TAG, "No media to handle, closing app");
             mainHandler.post(() -> currentMedia.setValue(null));
-            return;
+            return null;
         }
         if (currentMediaIndex == 0) {
             Log.d(TAG, "No video played yet, skipping video end handling");
             playNextVideo();
-            return;
+            return null;
         }
         MediaItem media = mediaList.get(currentMediaIndex - 1);
         Log.d(TAG, "Video ended: " + media.getTitle() + ", index: " + (currentMediaIndex - 1));
         playNextVideo();
+        return null;
     }
 
     private boolean isNetworkAvailable() {
@@ -107,8 +123,18 @@ public class VideoPlayerViewModel extends ViewModel {
     @Override
     protected void onCleared() {
         super.onCleared();
-        executor.shutdown();
+        if (!executor.isShutdown()) {
+            executor.shutdownNow();
+            try {
+                if (!executor.awaitTermination(1, TimeUnit.SECONDS)) {
+                    Log.w(TAG, "ExecutorService did not terminate");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
         mainHandler.removeCallbacksAndMessages(null);
+        Log.d(TAG, "ViewModel cleared, resources released");
     }
 
     public static class Factory implements ViewModelProvider.Factory {

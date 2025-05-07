@@ -10,8 +10,8 @@ android {
         applicationId = "com.example.caesartv"
         minSdk = 21
         targetSdk = 34
-        versionCode = 5
-        versionName = "1.0.5"
+        versionCode = 6
+        versionName = "1.0.6"
 
     }
 
@@ -48,4 +48,6 @@ dependencies {
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.ui)
     implementation(libs.gson)
+
+    implementation(libs.androidx.media)
 }

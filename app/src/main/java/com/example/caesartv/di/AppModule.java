@@ -34,7 +34,7 @@ public class AppModule {
         );
     }
 
-    private MediaRepository provideMediaRepository(Context context) {
+    public MediaRepository provideMediaRepository(Context context) {
         return new MediaRepositoryImpl(
                 provideWebSocketDataSource(context),
                 provideMediaDao(context),

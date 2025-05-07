@@ -1,9 +1,12 @@
 package com.example.caesartv.presentation.player;
 
 import android.content.Context;
+import android.media.MediaCodecInfo;
+import android.media.MediaCodecList;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -28,6 +31,7 @@ import com.example.caesartv.domain.model.MediaUrl;
 import com.example.caesartv.presentation.main.MainActivity;
 import java.io.File;
 import java.util.List;
+import java.util.function.Consumer;
 
 public class VideoPlayerFragment extends Fragment {
 
@@ -44,6 +48,14 @@ public class VideoPlayerFragment extends Fragment {
     private LinearLayout splitScreenContainer;
     private ProgressBar loadingSpinner;
     private String currentMediaId;
+    private Consumer<Void> onVideoReadyCallback;
+    private boolean isFirstPlayback = true;
+
+    public static VideoPlayerFragment newInstance(Consumer<Void> onVideoReadyCallback) {
+        VideoPlayerFragment fragment = new VideoPlayerFragment();
+        fragment.onVideoReadyCallback = onVideoReadyCallback;
+        return fragment;
+    }
 
     @Nullable
     @Override
@@ -56,6 +68,7 @@ public class VideoPlayerFragment extends Fragment {
         imageViewRight = view.findViewById(R.id.image_view_right);
         splitScreenContainer = view.findViewById(R.id.split_screen_container);
         loadingSpinner = view.findViewById(R.id.loading_spinner);
+        loadingSpinner.setVisibility(View.GONE);
         Log.d(TAG, "View initialized");
         return view;
     }
@@ -69,19 +82,16 @@ public class VideoPlayerFragment extends Fragment {
 
     @OptIn(markerClass = UnstableApi.class)
     private void initializePlayers() {
-        // Full-screen player for SINGLE media
         playerFull = new ExoPlayer.Builder(requireContext()).build();
         playerViewFull.setPlayer(playerFull);
         playerViewFull.setControllerAutoShow(false);
         playerFull.addListener(createPlayerListener("Full"));
 
-        // Left player for MULTIPLE media
         playerLeft = new ExoPlayer.Builder(requireContext()).build();
         playerViewLeft.setPlayer(playerLeft);
         playerViewLeft.setControllerAutoShow(false);
         playerLeft.addListener(createPlayerListener("Left"));
 
-        // Right player for MULTIPLE media
         playerRight = new ExoPlayer.Builder(requireContext()).build();
         playerViewRight.setPlayer(playerRight);
         playerViewRight.setControllerAutoShow(false);
@@ -95,11 +105,22 @@ public class VideoPlayerFragment extends Fragment {
                 switch (state) {
                     case Player.STATE_BUFFERING:
                         Log.d(TAG, playerName + ": Buffering");
-                        loadingSpinner.setVisibility(View.VISIBLE);
+                        if (!isFirstPlayback) {
+                            loadingSpinner.setVisibility(View.VISIBLE);
+                        }
                         break;
                     case Player.STATE_READY:
                         Log.d(TAG, playerName + ": Ready to play");
                         loadingSpinner.setVisibility(View.GONE);
+                        if (isFirstPlayback) {
+                            isFirstPlayback = false;
+                            if (onVideoReadyCallback != null) {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                                    onVideoReadyCallback.accept(null);
+                                }
+                                onVideoReadyCallback = null;
+                            }
+                        }
                         break;
                     case Player.STATE_ENDED:
                         Log.d(TAG, playerName + ": Playback ended");
@@ -111,9 +132,18 @@ public class VideoPlayerFragment extends Fragment {
 
             @Override
             public void onPlayerError(@NonNull androidx.media3.common.PlaybackException error) {
-                Log.e(TAG, playerName + ": ExoPlayer error: " + error.getMessage(), error);
+                Log.e(TAG, playerName + ": ExoPlayer error: " + error.getMessage() + ", Error code: " + error.errorCode, error);
+                if (error.getCause() != null) {
+                    Log.e(TAG, playerName + ": Error cause: " + error.getCause().getMessage());
+                }
                 loadingSpinner.setVisibility(View.GONE);
-                viewModel.handleVideoEnd();
+                if (error.errorCode == androidx.media3.exoplayer.ExoPlaybackException.ERROR_CODE_DECODER_INIT_FAILED ||
+                        error.errorCode == androidx.media3.exoplayer.ExoPlaybackException.ERROR_CODE_DECODING_FAILED) {
+                    Log.w(TAG, playerName + ": Decoder error detected, attempting remote playback");
+                    viewModel.retryCurrentMedia();
+                } else {
+                    viewModel.handleVideoEnd();
+                }
             }
         };
     }
@@ -128,7 +158,9 @@ public class VideoPlayerFragment extends Fragment {
         viewModel.getCurrentMedia().observe(getViewLifecycleOwner(), media -> {
             if (media == null) {
                 Log.w(TAG, "No media to play, closing app");
-                requireActivity().finish();
+                if (requireActivity() != null) {
+                    requireActivity().finish();
+                }
                 return;
             }
             if (media.getId().equals(currentMediaId)) {
@@ -138,7 +170,6 @@ public class VideoPlayerFragment extends Fragment {
             currentMediaId = media.getId();
             Log.d(TAG, "Processing media: " + media.getTitle() + ", Type: " + media.getMediaType());
 
-            // Reset UI
             resetUI();
 
             if ("SINGLE".equals(media.getMediaType())) {
@@ -159,7 +190,7 @@ public class VideoPlayerFragment extends Fragment {
         playerViewRight.setVisibility(View.GONE);
         imageViewLeft.setVisibility(View.GONE);
         imageViewRight.setVisibility(View.GONE);
-        loadingSpinner.setVisibility(View.VISIBLE);
+        loadingSpinner.setVisibility(View.GONE);
         if (playerFull != null) playerFull.stop();
         if (playerLeft != null) playerLeft.stop();
         if (playerRight != null) playerRight.stop();
@@ -169,30 +200,24 @@ public class VideoPlayerFragment extends Fragment {
         playerViewFull.setVisibility(View.VISIBLE);
         String localFilePath = media.getLocalFilePath() != null ? media.getLocalFilePath() : media.getUrl();
         Log.d(TAG, "Playing SINGLE media: " + media.getTitle() + ", Path: " + localFilePath);
-        if (localFilePath != null && new File(localFilePath).exists()) {
-            try {
-                Uri uri = Uri.fromFile(new File(localFilePath));
-                MediaItem mediaItem = MediaItem.fromUri(uri);
-                playerFull.setMediaItem(mediaItem);
-                playerFull.prepare();
-                playerFull.play();
-                viewModel.setStartTime(System.currentTimeMillis());
-            } catch (Exception e) {
-                Log.e(TAG, "Failed to play SINGLE media: " + media.getTitle(), e);
-                viewModel.handleVideoEnd();
+
+        File file = new File(localFilePath);
+        Log.d(TAG, "File check: Path=" + localFilePath + ", Exists=" + file.exists() + ", CanRead=" + file.canRead() + ", Size=" + (file.exists() ? file.length() : 0));
+
+        if (localFilePath != null && file.exists() && file.canRead()) {
+            if (!supports4KDecoding() && isLikely4KVideo(localFilePath)) {
+                Log.w(TAG, "Device does not support 4K for SINGLE media, attempting remote playback");
+                attemptRemotePlayback(media, playerFull, playerViewFull, "Full");
+            } else {
+                try {
+                    playVideoInView(playerFull, playerViewFull, localFilePath, "Full");
+                } catch (Exception e) {
+                    Log.e(TAG, "Failed to play local SINGLE media: " + media.getTitle(), e);
+                    attemptRemotePlayback(media, playerFull, playerViewFull, "Full");
+                }
             }
         } else if (isNetworkAvailable() && media.getUrl() != null) {
-            try {
-                Uri uri = Uri.parse(media.getUrl());
-                MediaItem mediaItem = MediaItem.fromUri(uri);
-                playerFull.setMediaItem(mediaItem);
-                playerFull.prepare();
-                playerFull.play();
-                viewModel.setStartTime(System.currentTimeMillis());
-            } catch (Exception e) {
-                Log.e(TAG, "Failed to play SINGLE media remotely: " + media.getTitle(), e);
-                viewModel.handleVideoEnd();
-            }
+            attemptRemotePlayback(media, playerFull, playerViewFull, "Full");
         } else {
             Log.e(TAG, "Invalid or missing video file for SINGLE media: " + localFilePath);
             viewModel.handleVideoEnd();
@@ -208,28 +233,66 @@ public class VideoPlayerFragment extends Fragment {
             return;
         }
 
-        // Handle left half (index 0)
+        boolean supports4K = supports4KDecoding();
+
         MediaUrl leftUrl = multipleUrls.get(0);
-        String leftPath = leftUrl.getLocalFilePath() != null && new File(leftUrl.getLocalFilePath()).exists() ? leftUrl.getLocalFilePath() : leftUrl.getUrl();
+        String leftPath = leftUrl.getLocalFilePath() != null ? leftUrl.getLocalFilePath() : leftUrl.getUrl();
         if ("video".equals(leftUrl.getUrlType())) {
-            if (leftPath != null && (new File(leftPath).exists() || (isNetworkAvailable() && !leftPath.startsWith("/")))) {
-                playVideoInView(playerLeft, playerViewLeft, leftPath, "Left");
+            if (leftPath != null) {
+                File leftFile = new File(leftPath);
+                Log.d(TAG, "Left video check: Path=" + leftPath + ", Exists=" + leftFile.exists() + ", CanRead=" + leftFile.canRead() + ", Size=" + (leftFile.exists() ? leftFile.length() : 0));
+                if (leftFile.exists() && leftFile.canRead()) {
+                    if (!supports4K && isLikely4KVideo(leftPath)) {
+                        Log.w(TAG, "Device does not support 4K for Left video, attempting remote playback");
+                        attemptRemotePlayback(leftUrl, playerLeft, playerViewLeft, "Left");
+                    } else {
+                        try {
+                            playVideoInView(playerLeft, playerViewLeft, leftPath, "Left");
+                        } catch (Exception e) {
+                            Log.e(TAG, "Failed to play local Left video: " + leftPath, e);
+                            attemptRemotePlayback(leftUrl, playerLeft, playerViewLeft, "Left");
+                        }
+                    }
+                } else if (isNetworkAvailable() && leftUrl.getUrl() != null) {
+                    attemptRemotePlayback(leftUrl, playerLeft, playerViewLeft, "Left");
+                } else {
+                    Log.e(TAG, "Invalid or missing video file for Left: " + leftPath);
+                    viewModel.handleVideoEnd();
+                }
             } else {
-                Log.w(TAG, "No valid video path for Left: " + leftPath);
+                Log.w(TAG, "No valid video path for Left");
                 viewModel.handleVideoEnd();
             }
         } else if ("image".equals(leftUrl.getUrlType())) {
             loadImageInView(imageViewLeft, leftPath, "Left");
         }
 
-        // Handle right half (index 1)
         MediaUrl rightUrl = multipleUrls.get(1);
-        String rightPath = rightUrl.getLocalFilePath() != null && new File(rightUrl.getLocalFilePath()).exists() ? rightUrl.getLocalFilePath() : rightUrl.getUrl();
+        String rightPath = rightUrl.getLocalFilePath() != null ? rightUrl.getLocalFilePath() : rightUrl.getUrl();
         if ("video".equals(rightUrl.getUrlType())) {
-            if (rightPath != null && (new File(rightPath).exists() || (isNetworkAvailable() && !rightPath.startsWith("/")))) {
-                playVideoInView(playerRight, playerViewRight, rightPath, "Right");
+            if (rightPath != null) {
+                File rightFile = new File(rightPath);
+                Log.d(TAG, "Right video check: Path=" + rightPath + ", Exists=" + rightFile.exists() + ", CanRead=" + rightFile.canRead() + ", Size=" + (rightFile.exists() ? rightFile.length() : 0));
+                if (rightFile.exists() && rightFile.canRead()) {
+                    if (!supports4K && isLikely4KVideo(rightPath)) {
+                        Log.w(TAG, "Device does not support 4K for Right video, attempting remote playback");
+                        attemptRemotePlayback(rightUrl, playerRight, playerViewRight, "Right");
+                    } else {
+                        try {
+                            playVideoInView(playerRight, playerViewRight, rightPath, "Right");
+                        } catch (Exception e) {
+                            Log.e(TAG, "Failed to play local Right video: " + rightPath, e);
+                            attemptRemotePlayback(rightUrl, playerRight, playerViewRight, "Right");
+                        }
+                    }
+                } else if (isNetworkAvailable() && rightUrl.getUrl() != null) {
+                    attemptRemotePlayback(rightUrl, playerRight, playerViewRight, "Right");
+                } else {
+                    Log.e(TAG, "Invalid or missing video file for Right: " + rightPath);
+                    viewModel.handleVideoEnd();
+                }
             } else {
-                Log.w(TAG, "No valid video path for Right: " + rightPath);
+                Log.w(TAG, "No valid video path for Right");
                 viewModel.handleVideoEnd();
             }
         } else if ("image".equals(rightUrl.getUrlType())) {
@@ -239,19 +302,44 @@ public class VideoPlayerFragment extends Fragment {
         viewModel.setStartTime(System.currentTimeMillis());
     }
 
+    private void attemptRemotePlayback(com.example.caesartv.domain.model.MediaItem media, ExoPlayer player, PlayerView playerView, String viewName) {
+        if (media.getUrl() == null) {
+            Log.e(TAG, "No remote URL available for media: " + media.getTitle() + " in " + viewName);
+            viewModel.handleVideoEnd();
+            return;
+        }
+        Log.d(TAG, "Falling back to remote URL in " + viewName + ": " + media.getUrl());
+        try {
+            playVideoInView(player, playerView, media.getUrl(), viewName);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to play remote media in " + viewName + ": " + media.getTitle(), e);
+            viewModel.handleVideoEnd();
+        }
+    }
+
+    private void attemptRemotePlayback(MediaUrl mediaUrl, ExoPlayer player, PlayerView playerView, String viewName) {
+        if (mediaUrl.getUrl() == null) {
+            Log.e(TAG, "No remote URL available for media URL in " + viewName);
+            viewModel.handleVideoEnd();
+            return;
+        }
+        Log.d(TAG, "Falling back to remote URL in " + viewName + ": " + mediaUrl.getUrl());
+        try {
+            playVideoInView(player, playerView, mediaUrl.getUrl(), viewName);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to play remote media URL in " + viewName + ": " + mediaUrl.getUrl(), e);
+            viewModel.handleVideoEnd();
+        }
+    }
+
     private void playVideoInView(ExoPlayer player, PlayerView playerView, String path, String viewName) {
         playerView.setVisibility(View.VISIBLE);
         Log.d(TAG, "Playing video in " + viewName + ": " + path);
-        try {
-            Uri uri = path.startsWith("/") ? Uri.fromFile(new File(path)) : Uri.parse(path);
-            MediaItem mediaItem = MediaItem.fromUri(uri);
-            player.setMediaItem(mediaItem);
-            player.prepare();
-            player.play();
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to play video in " + viewName + ": " + path, e);
-            viewModel.handleVideoEnd();
-        }
+        Uri uri = path.startsWith("/") ? Uri.fromFile(new File(path)) : Uri.parse(path);
+        MediaItem mediaItem = MediaItem.fromUri(uri);
+        player.setMediaItem(mediaItem);
+        player.prepare();
+        player.play();
     }
 
     private void loadImageInView(ImageView imageView, String url, String viewName) {
@@ -272,6 +360,38 @@ public class VideoPlayerFragment extends Fragment {
         ConnectivityManager cm = (ConnectivityManager) requireContext().getSystemService(Context.CONNECTIVITY_SERVICE);
         NetworkInfo networkInfo = cm.getActiveNetworkInfo();
         return networkInfo != null && networkInfo.isConnected();
+    }
+
+    private boolean supports4KDecoding() {
+        MediaCodecList codecList = new MediaCodecList(MediaCodecList.ALL_CODECS);
+        for (MediaCodecInfo codecInfo : codecList.getCodecInfos()) {
+            if (codecInfo.isEncoder()) continue;
+            for (String type : codecInfo.getSupportedTypes()) {
+                if (type.equals("video/avc")) {
+                    MediaCodecInfo.CodecCapabilities caps = codecInfo.getCapabilitiesForType(type);
+                    if (caps.getVideoCapabilities().areSizeAndRateSupported(3840, 2160, 30)) {
+                        Log.d(TAG, "Device supports 4K H.264 decoding");
+                        return true;
+                    }
+                }
+            }
+        }
+        Log.d(TAG, "Device does not support 4K H.264 decoding");
+        return false;
+    }
+
+    private boolean isLikely4KVideo(String path) {
+        if (path.startsWith("http")) {
+            return true;
+        }
+        File file = new File(path);
+        if (file.exists()) {
+            long size = file.length();
+            boolean isLarge = size > 50 * 1024 * 1024;
+            Log.d(TAG, "Video size check: Path=" + path + ", Size=" + size + ", Likely 4K=" + isLarge);
+            return isLarge;
+        }
+        return false;
     }
 
     @Override
@@ -325,5 +445,12 @@ public class VideoPlayerFragment extends Fragment {
             playerRight = null;
             Log.d(TAG, "Right player released");
         }
+    }
+
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        releaseAllPlayers(); // Ensure players are released even if view is not destroyed
+        Log.d(TAG, "Fragment destroyed");
     }
 }
