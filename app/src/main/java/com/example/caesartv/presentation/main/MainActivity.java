@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit;
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "MainActivity";
-    private MainViewmodel viewModel; // Corrected typo from MainViewmodel to MainViewModel
+    private MainViewmodel viewModel;
     private Handler mainHandler;
     private GetCachedMediaUseCase cachedMediaUseCase;
     private AppModule appModule;

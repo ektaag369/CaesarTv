@@ -23,6 +23,7 @@ import java.util.concurrent.TimeUnit;
 public class VideoPlayerViewModel extends ViewModel {
 
     private static final String TAG = "VideoPlayerViewModel";
+    private static final long CLOSE_APP_DELAY_MS = 3000; // 3-second delay before closing app
     private final GetCachedMediaUseCase getCachedMediaUseCase;
     private final Context context;
     private final MutableLiveData<MediaItem> currentMedia = new MutableLiveData<>();
@@ -46,15 +47,15 @@ public class VideoPlayerViewModel extends ViewModel {
                 mainHandler.post(this::playNextVideo);
             } catch (Exception e) {
                 Log.e(TAG, "Error loading cached media: " + e.getMessage(), e);
-                mainHandler.post(() -> currentMedia.setValue(null));
+                mainHandler.postDelayed(() -> currentMedia.setValue(null), CLOSE_APP_DELAY_MS);
             }
         });
     }
 
     public void playNextVideo() {
         if (mediaList.isEmpty()) {
-            Log.w(TAG, "No media items to play, closing app");
-            mainHandler.post(() -> currentMedia.setValue(null));
+            Log.w(TAG, "No media items to play, closing app after delay");
+            mainHandler.postDelayed(() -> currentMedia.setValue(null), CLOSE_APP_DELAY_MS);
             return;
         }
         boolean isOffline = !isNetworkAvailable();
@@ -62,8 +63,8 @@ public class VideoPlayerViewModel extends ViewModel {
 
         // Check if we've played all media items
         if (currentMediaIndex >= mediaList.size()) {
-            Log.d(TAG, "All media items played, closing app");
-            mainHandler.post(() -> currentMedia.setValue(null));
+            Log.d(TAG, "All media items played, closing app after delay");
+            mainHandler.postDelayed(() -> currentMedia.setValue(null), CLOSE_APP_DELAY_MS);
             return;
         }
 
@@ -86,8 +87,8 @@ public class VideoPlayerViewModel extends ViewModel {
 
     public Throwable handleVideoEnd() {
         if (mediaList.isEmpty()) {
-            Log.w(TAG, "No media to handle, closing app");
-            mainHandler.post(() -> currentMedia.setValue(null));
+            Log.w(TAG, "No media to handle, closing app after delay");
+            mainHandler.postDelayed(() -> currentMedia.setValue(null), CLOSE_APP_DELAY_MS);
             return null;
         }
         if (currentMediaIndex == 0) {

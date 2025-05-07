@@ -97,21 +97,31 @@ public class WebSocketDataSource {
             });
 
             socket.on("latest_all_media", args -> {
-                socketHasReceivedMedia = true;
-                Log.d(TAG, "Received latest_all_media, raw response: " + args[0]);
+//                socketHasReceivedMedia = true;
+//                Log.d(TAG, "Received latest_all_media, raw response: " + args[0]);
+//                try {
+//                    JSONObject data = (JSONObject) args[0];
+//                    List<MediaItem> mediaList = parseMediaData(data);
+//                    if (!mediaList.isEmpty()) {
+//                        listener.onMediaFetched(mediaList);
+//                        Log.d(TAG, "Fetched " + mediaList.size() + " media items from latest_all_media: " +
+//                                getMediaIds(mediaList));
+//                    } else {
+//                        Log.w(TAG, "No active media in latest_all_media");
+//                        onError.run();
+//                    }
+//                } catch (Exception e) {
+//                    Log.e(TAG, "Error parsing latest_all_media", e);
+//                    onError.run();
+//                }
+                Log.d(TAG, "Device latest_media successfully, raw response: " + args[0]);
                 try {
                     JSONObject data = (JSONObject) args[0];
-                    List<MediaItem> mediaList = parseMediaData(data);
-                    if (!mediaList.isEmpty()) {
-                        listener.onMediaFetched(mediaList);
-                        Log.d(TAG, "Fetched " + mediaList.size() + " media items from latest_all_media: " +
-                                getMediaIds(mediaList));
-                    } else {
-                        Log.w(TAG, "No active media in latest_all_media");
-                        onError.run();
-                    }
+                    String deviceId = data.optString("deviceId", getDeviceId());
+                    Log.d(TAG, "Fetching media from API for deviceId: " + deviceId);
+                    fetchMediaFromApiWithRetry(deviceId, listener, 0);
                 } catch (Exception e) {
-                    Log.e(TAG, "Error parsing latest_all_media", e);
+                    Log.e(TAG, "Error processing registered_success", e);
                     onError.run();
                 }
             });
