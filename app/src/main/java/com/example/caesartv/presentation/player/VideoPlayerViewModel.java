@@ -23,7 +23,6 @@ import java.util.concurrent.TimeUnit;
 public class VideoPlayerViewModel extends ViewModel {
 
     private static final String TAG = "VideoPlayerViewModel";
-    private static final long CLOSE_APP_DELAY_MS = 3000; // 3-second delay before closing app
     private final GetCachedMediaUseCase getCachedMediaUseCase;
     private final Context context;
     private final MutableLiveData<MediaItem> currentMedia = new MutableLiveData<>();
@@ -47,24 +46,23 @@ public class VideoPlayerViewModel extends ViewModel {
                 mainHandler.post(this::playNextVideo);
             } catch (Exception e) {
                 Log.e(TAG, "Error loading cached media: " + e.getMessage(), e);
-                mainHandler.postDelayed(() -> currentMedia.setValue(null), CLOSE_APP_DELAY_MS);
+                mainHandler.post(() -> currentMedia.setValue(null)); // Close app immediately on error
             }
         });
     }
 
     public void playNextVideo() {
         if (mediaList.isEmpty()) {
-            Log.w(TAG, "No media items to play, closing app after delay");
-            mainHandler.postDelayed(() -> currentMedia.setValue(null), CLOSE_APP_DELAY_MS);
+            Log.w(TAG, "No media items to play, closing app immediately");
+            currentMedia.setValue(null); // Close app immediately
             return;
         }
         boolean isOffline = !isNetworkAvailable();
         Log.d(TAG, "Playing video, isOffline: " + isOffline + ", currentMediaIndex: " + currentMediaIndex + ", mediaList size: " + mediaList.size());
 
-        // Check if we've played all media items
         if (currentMediaIndex >= mediaList.size()) {
-            Log.d(TAG, "All media items played, closing app after delay");
-            mainHandler.postDelayed(() -> currentMedia.setValue(null), CLOSE_APP_DELAY_MS);
+            Log.d(TAG, "All media items played, closing app immediately");
+            currentMedia.setValue(null);
             return;
         }
 
@@ -74,21 +72,10 @@ public class VideoPlayerViewModel extends ViewModel {
         currentMediaIndex++;
     }
 
-    public void retryCurrentMedia() {
-        if (mediaList.isEmpty() || currentMediaIndex == 0) {
-            Log.w(TAG, "No media to retry");
-            handleVideoEnd();
-            return;
-        }
-        MediaItem media = mediaList.get(currentMediaIndex - 1);
-        Log.d(TAG, "Retrying media: " + media.getTitle() + ", index: " + (currentMediaIndex - 1));
-        mainHandler.post(() -> currentMedia.setValue(media));
-    }
-
     public Throwable handleVideoEnd() {
         if (mediaList.isEmpty()) {
-            Log.w(TAG, "No media to handle, closing app after delay");
-            mainHandler.postDelayed(() -> currentMedia.setValue(null), CLOSE_APP_DELAY_MS);
+            Log.w(TAG, "No media to handle, closing app immediately");
+            mainHandler.post(() -> currentMedia.setValue(null)); // Close app immediately
             return null;
         }
         if (currentMediaIndex == 0) {
@@ -100,6 +87,17 @@ public class VideoPlayerViewModel extends ViewModel {
         Log.d(TAG, "Video ended: " + media.getTitle() + ", index: " + (currentMediaIndex - 1));
         playNextVideo();
         return null;
+    }
+
+    public void retryCurrentMedia() {
+        if (mediaList.isEmpty() || currentMediaIndex == 0) {
+            Log.w(TAG, "No media to retry, closing app immediately");
+            mainHandler.post(() -> currentMedia.setValue(null)); // Close app immediately
+            return;
+        }
+        MediaItem media = mediaList.get(currentMediaIndex - 1);
+        Log.d(TAG, "Retrying media: " + media.getTitle() + ", index: " + (currentMediaIndex - 1));
+        mainHandler.post(() -> currentMedia.setValue(media));
     }
 
     private boolean isNetworkAvailable() {
