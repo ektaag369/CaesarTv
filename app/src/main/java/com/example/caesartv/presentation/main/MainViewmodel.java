@@ -11,6 +11,8 @@ import androidx.lifecycle.LiveData;
 import androidx.lifecycle.MutableLiveData;
 import androidx.lifecycle.ViewModel;
 import androidx.lifecycle.ViewModelProvider;
+
+import com.example.caesartv.CustomLogger;
 import com.example.caesartv.domain.model.MediaItem;
 import com.example.caesartv.domain.usecase.FetchMediaUseCase;
 import com.example.caesartv.domain.usecase.GetCachedMediaUseCase;
@@ -58,18 +60,18 @@ public class MainViewmodel extends ViewModel {
     public void connectWebSocket(int retryCount) {
         if (isWebSocketConnected || retryCount > MAX_RETRIES) {
             if (!isWebSocketConnected) {
-                Log.w(TAG, "Max retries reached, using cached media");
+                CustomLogger.w(TAG, "Max retries reached, using cached media");
                 isDeviceBlocked.postValue(false);
             }
             return;
         }
         if (!isNetworkAvailable()) {
-            Log.w(TAG, "No network available, using cached media");
+            CustomLogger.w(TAG, "No network available, using cached media");
             isDeviceBlocked.postValue(false);
             return;
         }
         if (executorService.isShutdown()) {
-            Log.w(TAG, "ExecutorService is shutdown, cannot initialize WebSocket");
+            CustomLogger.w(TAG, "ExecutorService is shutdown, cannot initialize WebSocket");
             isDeviceBlocked.postValue(false);
             return;
         }
@@ -81,7 +83,7 @@ public class MainViewmodel extends ViewModel {
                             executorService.execute(() -> {
                                 mediaItems.postValue(mediaList);
                                 isDeviceBlocked.postValue(false);
-                                Log.d(TAG, "WebSocket fetched and updated DB with " + mediaList.size() + " media items");
+                                CustomLogger.d(TAG, "WebSocket fetched and updated DB with " + mediaList.size() + " media items");
                             });
                         }
                     },
@@ -89,7 +91,7 @@ public class MainViewmodel extends ViewModel {
                         if (!executorService.isShutdown()) {
                             executorService.execute(() -> {
                                 isDeviceBlocked.postValue(true);
-                                Log.w(TAG, "Device blocked via WebSocket");
+                                CustomLogger.w(TAG, "Device blocked via WebSocket");
                                 isWebSocketConnected = false;
                             });
                         }
@@ -97,12 +99,14 @@ public class MainViewmodel extends ViewModel {
                     () -> {
                         if (!executorService.isShutdown()) {
                             executorService.execute(() -> {
-                                Log.w(TAG, "WebSocket error, retrying (" + (retryCount + 1) + "/" + MAX_RETRIES + ")");
+                                CustomLogger.w(TAG, "WebSocket error, retrying (" + (retryCount + 1) + "/" + MAX_RETRIES + ")");
                                 isDeviceBlocked.postValue(false);
                                 isWebSocketConnected = false;
                                 try {
+                                    CustomLogger.d(TAG, "Retrying in " + RETRY_DELAY_MS + "ms");
                                     Thread.sleep(RETRY_DELAY_MS);
                                 } catch (InterruptedException e) {
+                                    CustomLogger.e(TAG, "Retry interrupted: " + e.getMessage(), e);
                                     Thread.currentThread().interrupt();
                                 }
                                 connectWebSocket(retryCount + 1);
@@ -114,9 +118,9 @@ public class MainViewmodel extends ViewModel {
     }
 
     public void checkCachedMedia() {
-        Log.d(TAG, "Checking cached media");
+        CustomLogger.d(TAG, "Checking cached media");
         if (executorService.isShutdown()) {
-            Log.w(TAG, "ExecutorService is shutdown, cannot check cached media");
+            CustomLogger.w(TAG, "ExecutorService is shutdown, cannot check cached media");
             mediaItems.postValue(new ArrayList<>());
             return;
         }
@@ -127,16 +131,17 @@ public class MainViewmodel extends ViewModel {
                     executorService.execute(() -> {
                         if (cachedMedia != null && !cachedMedia.isEmpty()) {
                             mediaItems.postValue(cachedMedia);
-                            Log.d(TAG, "Found " + cachedMedia.size() + " cached media items");
+                            CustomLogger.d(TAG, "Found " + cachedMedia.size() + " cached media items");
                         } else {
-                            Log.w(TAG, "No cached media found");
+                            CustomLogger.w(TAG, "No cached media found");
                             mediaItems.postValue(new ArrayList<>());
                         }
                     });
                 }
             } catch (Exception e) {
-                Log.e(TAG, "Error loading cached media: " + e.getMessage(), e);
+                CustomLogger.e(TAG, "Error loading cached media: " + e.getMessage(), e);
                 if (!executorService.isShutdown()) {
+                    CustomLogger.d(TAG, "Clearing cached media");
                     executorService.execute(() -> mediaItems.postValue(new ArrayList<>()));
                 }
             }
@@ -147,6 +152,7 @@ public class MainViewmodel extends ViewModel {
         ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
         Network network = null;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            CustomLogger.d(TAG, "Using new network check");
             network = cm.getActiveNetwork();
         }
         if (network == null) return false;
@@ -166,13 +172,13 @@ public class MainViewmodel extends ViewModel {
         networkCallback = new ConnectivityManager.NetworkCallback() {
             @Override
             public void onAvailable(Network network) {
-                Log.d(TAG, "Network available, initializing WebSocket");
+                CustomLogger.d(TAG, "Network available, initializing WebSocket");
                 connectWebSocket(0);
             }
 
             @Override
             public void onLost(Network network) {
-                Log.w(TAG, "Network lost, stopping WebSocket");
+                CustomLogger.w(TAG, "Network lost, stopping WebSocket");
                 disconnectWebSocket();
                 checkCachedMedia();
             }
@@ -185,7 +191,7 @@ public class MainViewmodel extends ViewModel {
             executorService.execute(() -> {
                 fetchMediaUseCase.disconnect();
                 isWebSocketConnected = false;
-                Log.d(TAG, "WebSocket disconnected");
+                CustomLogger.d(TAG, "WebSocket disconnected");
             });
         }
     }
@@ -197,19 +203,20 @@ public class MainViewmodel extends ViewModel {
         if (networkCallback != null) {
             ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
             cm.unregisterNetworkCallback(networkCallback);
+            CustomLogger.d(TAG, "Network callback unregistered");
             networkCallback = null;
         }
         if (!executorService.isShutdown()) {
             executorService.shutdownNow();
             try {
                 if (!executorService.awaitTermination(1, TimeUnit.SECONDS)) {
-                    Log.w(TAG, "ExecutorService did not terminate");
+                    CustomLogger.w(TAG, "ExecutorService did not terminate");
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
         }
-        Log.d(TAG, "ViewModel cleared, resources released");
+        CustomLogger.d(TAG, "ViewModel cleared, resources released");
     }
 
     public static class Factory extends ViewModelProvider.NewInstanceFactory {

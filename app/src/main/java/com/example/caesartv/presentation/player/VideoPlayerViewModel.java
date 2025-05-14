@@ -10,6 +10,8 @@ import androidx.lifecycle.LiveData;
 import androidx.lifecycle.MutableLiveData;
 import androidx.lifecycle.ViewModel;
 import androidx.lifecycle.ViewModelProvider;
+
+import com.example.caesartv.CustomLogger;
 import com.example.caesartv.domain.model.MediaItem;
 import com.example.caesartv.domain.usecase.GetCachedMediaUseCase;
 
@@ -42,10 +44,10 @@ public class VideoPlayerViewModel extends ViewModel {
         executor.execute(() -> {
             try {
                 mediaList = getCachedMediaUseCase.execute();
-                Log.d(TAG, "Initialized with " + mediaList.size() + " cached media items");
+                CustomLogger.d(TAG, "Initialized with " + mediaList.size() + " cached media items");
                 mainHandler.post(this::playNextVideo);
             } catch (Exception e) {
-                Log.e(TAG, "Error loading cached media: " + e.getMessage(), e);
+                CustomLogger.e(TAG, "Error loading cached media: " + e.getMessage(), e);
                 mainHandler.post(() -> currentMedia.setValue(null)); // Close app immediately on error
             }
         });
@@ -53,50 +55,50 @@ public class VideoPlayerViewModel extends ViewModel {
 
     public void playNextVideo() {
         if (mediaList.isEmpty()) {
-            Log.w(TAG, "No media items to play, closing app immediately");
+            CustomLogger.w(TAG, "No media items to play, closing app immediately");
             currentMedia.setValue(null); // Close app immediately
             return;
         }
         boolean isOffline = !isNetworkAvailable();
-        Log.d(TAG, "Playing video, isOffline: " + isOffline + ", currentMediaIndex: " + currentMediaIndex + ", mediaList size: " + mediaList.size());
+        CustomLogger.d(TAG, "Playing video, isOffline: " + isOffline + ", currentMediaIndex: " + currentMediaIndex + ", mediaList size: " + mediaList.size());
 
         if (currentMediaIndex >= mediaList.size()) {
-            Log.d(TAG, "All media items played, closing app immediately");
+            CustomLogger.d(TAG, "All media items played, closing app immediately");
             currentMedia.setValue(null);
             return;
         }
 
         MediaItem media = mediaList.get(currentMediaIndex);
-        Log.d(TAG, "Playing media: " + media.getTitle() + ", index: " + currentMediaIndex + ", localPath: " + (media.getLocalFilePath() != null ? media.getLocalFilePath() : media.getUrl()) + ", exists: " + (media.getLocalFilePath() != null && new File(media.getLocalFilePath()).exists()));
+        CustomLogger.d(TAG, "Playing media: " + media.getTitle() + ", index: " + currentMediaIndex + ", localPath: " + (media.getLocalFilePath() != null ? media.getLocalFilePath() : media.getUrl()) + ", exists: " + (media.getLocalFilePath() != null && new File(media.getLocalFilePath()).exists()));
         currentMedia.setValue(media);
         currentMediaIndex++;
     }
 
     public Throwable handleVideoEnd() {
         if (mediaList.isEmpty()) {
-            Log.w(TAG, "No media to handle, closing app immediately");
+            CustomLogger.w(TAG, "No media to handle, closing app immediately");
             mainHandler.post(() -> currentMedia.setValue(null)); // Close app immediately
             return null;
         }
         if (currentMediaIndex == 0) {
-            Log.d(TAG, "No video played yet, skipping video end handling");
+            CustomLogger.d(TAG, "No video played yet, skipping video end handling");
             playNextVideo();
             return null;
         }
         MediaItem media = mediaList.get(currentMediaIndex - 1);
-        Log.d(TAG, "Video ended: " + media.getTitle() + ", index: " + (currentMediaIndex - 1));
+        CustomLogger.d(TAG, "Video ended: " + media.getTitle() + ", index: " + (currentMediaIndex - 1));
         playNextVideo();
         return null;
     }
 
     public void retryCurrentMedia() {
         if (mediaList.isEmpty() || currentMediaIndex == 0) {
-            Log.w(TAG, "No media to retry, closing app immediately");
+            CustomLogger.w(TAG, "No media to retry, closing app immediately");
             mainHandler.post(() -> currentMedia.setValue(null)); // Close app immediately
             return;
         }
         MediaItem media = mediaList.get(currentMediaIndex - 1);
-        Log.d(TAG, "Retrying media: " + media.getTitle() + ", index: " + (currentMediaIndex - 1));
+        CustomLogger.d(TAG, "Retrying media: " + media.getTitle() + ", index: " + (currentMediaIndex - 1));
         mainHandler.post(() -> currentMedia.setValue(media));
     }
 
@@ -116,7 +118,7 @@ public class VideoPlayerViewModel extends ViewModel {
 
     public void setStartTime(long startTime) {
         this.startTime = startTime;
-        Log.d(TAG, "Set start time: " + startTime);
+        CustomLogger.d(TAG, "Set start time: " + startTime);
     }
 
     @Override
@@ -126,14 +128,14 @@ public class VideoPlayerViewModel extends ViewModel {
             executor.shutdownNow();
             try {
                 if (!executor.awaitTermination(1, TimeUnit.SECONDS)) {
-                    Log.w(TAG, "ExecutorService did not terminate");
+                    CustomLogger.w(TAG, "ExecutorService did not terminate");
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
         }
         mainHandler.removeCallbacksAndMessages(null);
-        Log.d(TAG, "ViewModel cleared, resources released");
+        CustomLogger.d(TAG, "ViewModel cleared, resources released");
     }
 
     public static class Factory implements ViewModelProvider.Factory {

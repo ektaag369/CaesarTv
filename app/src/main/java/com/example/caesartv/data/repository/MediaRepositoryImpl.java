@@ -5,6 +5,8 @@ import android.media.MediaMetadataRetriever;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.util.Log;
+
+import com.example.caesartv.CustomLogger;
 import com.example.caesartv.data.local.MediaDao;
 import com.example.caesartv.data.local.MediaEntity;
 import com.example.caesartv.data.local.MediaUrlEntity;
@@ -52,20 +54,20 @@ public class MediaRepositoryImpl implements MediaRepository {
                 mediaItems -> {
                     executor.execute(() -> {
                         try {
-                            Log.d(TAG, "Received " + mediaItems.size() + " media items from WebSocket");
+                            CustomLogger.d(TAG, "Received " + mediaItems.size() + " media items from WebSocket");
                             // Clear old data
                             mediaDao.deleteAll();
                             mediaDao.deleteAllUrls();
-                            Log.d(TAG, "Cleared all previous media and URLs from database");
+                            CustomLogger.d(TAG, "Cleared all previous media and URLs from database");
 
                             List<MediaEntity> entities = new ArrayList<>();
                             List<MediaUrlEntity> urlEntities = new ArrayList<>();
                             for (MediaItem item : mediaItems) {
                                 String localFilePath = downloadVideo(item.getUrl(), item.getId());
-                                Log.d(TAG, "Media ID: " + item.getId() + ", Local file path: " + localFilePath);
+                                CustomLogger.d(TAG, "Media ID: " + item.getId() + ", Local file path: " + localFilePath);
                                 // Use remote URL if download fails
                                 String finalFilePath = localFilePath != null ? localFilePath : item.getUrl();
-                                Log.d(TAG, "Saving media ID: " + item.getId() + " with final file path: " + finalFilePath);
+                                CustomLogger.d(TAG, "Saving media ID: " + item.getId() + " with final file path: " + finalFilePath);
                                 entities.add(toEntity(item, finalFilePath));
 
                                 // Download videos in multipleUrl for MULTIPLE media
@@ -73,17 +75,17 @@ public class MediaRepositoryImpl implements MediaRepository {
                                     String urlLocalFilePath = null;
                                     if ("video".equals(url.getUrlType())) {
                                         urlLocalFilePath = downloadVideo(url.getUrl(), url.getId());
-                                        Log.d(TAG, "Downloaded multipleUrl video for ID: " + url.getId() + ", Local path: " + urlLocalFilePath);
+                                        CustomLogger.d(TAG, "Downloaded multipleUrl video for ID: " + url.getId() + ", Local path: " + urlLocalFilePath);
                                     }
                                     urlEntities.add(new MediaUrlEntity(url.getUrlType(), url.getUrl(), url.getId(), item.getId(), urlLocalFilePath));
                                 }
                             }
                             mediaDao.insertAll(entities);
                             mediaDao.insertUrls(urlEntities);
-                            Log.d(TAG, "Saved " + entities.size() + " media items and " + urlEntities.size() + " URLs to database");
+                            CustomLogger.d(TAG, "Saved " + entities.size() + " media items and " + urlEntities.size() + " URLs to database");
                             listener.onMediaFetched(mediaItems);
                         } catch (Exception e) {
-                            Log.e(TAG, "Error saving media to database", e);
+                            CustomLogger.e(TAG, "Error saving media to database", e);
                             onError.run();
                         }
                     });
@@ -99,17 +101,17 @@ public class MediaRepositoryImpl implements MediaRepository {
         List<MediaItem> mediaItems = new ArrayList<>();
         for (MediaWithUrls item : mediaWithUrls) {
             MediaItem mediaItem = toDomain(item);
-            Log.d(TAG, "Cached media ID: " + mediaItem.getId() + ", URL: " + mediaItem.getUrl() + ", Local file path: " + mediaItem.getLocalFilePath());
+            CustomLogger.d(TAG, "Cached media ID: " + mediaItem.getId() + ", URL: " + mediaItem.getUrl() + ", Local file path: " + mediaItem.getLocalFilePath());
             mediaItems.add(mediaItem);
         }
-        Log.d(TAG, "Fetched db size" + mediaItems.size() + " cached media items");
+        CustomLogger.d(TAG, "Fetched db size" + mediaItems.size() + " cached media items");
         return mediaItems;
     }
 
     @Override
     public int countCachedMedia() {
         int count = mediaDao.countActiveMedia();
-        Log.d(TAG, "Counted " + count + " active media items in database");
+        CustomLogger.d(TAG, "Counted " + count + " active media items in database");
         return count;
     }
 
@@ -124,7 +126,7 @@ public class MediaRepositoryImpl implements MediaRepository {
     }
 
     private MediaEntity toEntity(MediaItem item, String localFilePath) {
-        Log.d(TAG, "Mapping MediaItem to MediaEntity, ID: " + item.getId() + ", Local file path: " + localFilePath);
+        CustomLogger.d(TAG, "Mapping MediaItem to MediaEntity, ID: " + item.getId() + ", Local file path: " + localFilePath);
         return new MediaEntity(
                 item.getId(),
                 item.getTitle(),
@@ -151,7 +153,7 @@ public class MediaRepositoryImpl implements MediaRepository {
         }
         // For MULTIPLE media, url may be null; use localFilePath if available, otherwise null
         String finalUrl = entity.localFilePath != null && !entity.localFilePath.isEmpty() && new File(entity.localFilePath).exists() ? entity.localFilePath : entity.url;
-        Log.d(TAG, "Mapping MediaEntity to MediaItem, ID: " + entity.id + ", Selected URL: " + (finalUrl != null ? finalUrl : "null") + ", Local file exists: " + (entity.localFilePath != null && new File(entity.localFilePath).exists() ? "yes" : "no"));
+        CustomLogger.d(TAG, "Mapping MediaEntity to MediaItem, ID: " + entity.id + ", Selected URL: " + (finalUrl != null ? finalUrl : "null") + ", Local file exists: " + (entity.localFilePath != null && new File(entity.localFilePath).exists() ? "yes" : "no"));
         MediaItem mediaItem = new MediaItem(
                 entity.id,
                 entity.title,
@@ -172,7 +174,7 @@ public class MediaRepositoryImpl implements MediaRepository {
 
     private String downloadVideo(String url, String mediaId) {
         if (url == null || url.isEmpty()) {
-            Log.w(TAG, "No URL provided for media ID: " + mediaId);
+            CustomLogger.w(TAG, "No URL provided for media ID: " + mediaId);
             return null;
         }
 
@@ -180,37 +182,37 @@ public class MediaRepositoryImpl implements MediaRepository {
             try {
                 File dir = new File(context.getFilesDir(), "videos");
                 if (!dir.exists() && !dir.mkdirs()) {
-                    Log.e(TAG, "Failed to create videos directory: " + dir.getAbsolutePath());
+                    CustomLogger.d(TAG, "Failed to create videos directory: " + dir.getAbsolutePath());
                     return null;
                 }
                 File file = new File(dir, mediaId + ".mp4");
                 if (file.exists() && file.length() > 1024 && file.canRead()) {
-                    Log.d(TAG, "Video already cached: " + file.getAbsolutePath() + ", Size: " + file.length() + " bytes");
+                    CustomLogger.d(TAG, "Video already cached: " + file.getAbsolutePath() + ", Size: " + file.length() + " bytes");
                     if (isValidVideoFile(file)) {
                         return file.getAbsolutePath();
                     } else {
-                        Log.w(TAG, "Cached video is invalid, deleting and re-downloading: " + file.getAbsolutePath());
+                        CustomLogger.w(TAG, "Cached video is invalid, deleting and re-downloading: " + file.getAbsolutePath());
                         file.delete();
                     }
                 }
 
                 if (!isNetworkAvailable()) {
-                    Log.w(TAG, "No network available, cannot download video for media ID: " + mediaId + ", URL: " + url);
+                    CustomLogger.w(TAG, "No network available, cannot download video for media ID: " + mediaId + ", URL: " + url);
                     return null;
                 }
 
-                Log.d(TAG, "Downloading video from: " + url + " for media ID: " + mediaId + ", Attempt: " + (attempt + 1));
+                CustomLogger.d(TAG, "Downloading video from: " + url + " for media ID: " + mediaId + ", Attempt: " + (attempt + 1));
                 Request request = new Request.Builder().url(url).build();
                 Response response = client.newCall(request).execute();
                 if (!response.isSuccessful()) {
-                    Log.e(TAG, "Failed to download video, HTTP code: " + response.code() + ", Message: " + response.message() + ", URL: " + url);
+                    CustomLogger.d(TAG, "Failed to download video, HTTP code: " + response.code() + ", Message: " + response.message() + ", URL: " + url);
                     response.close();
                     continue;
                 }
 
                 byte[] bytes = response.body().bytes();
                 if (bytes.length < 1024) {
-                    Log.e(TAG, "Downloaded video too small: " + bytes.length + " bytes for media ID: " + mediaId + ", URL: " + url);
+                    CustomLogger.d(TAG, "Downloaded video too small: " + bytes.length + " bytes for media ID: " + mediaId + ", URL: " + url);
                     response.close();
                     continue;
                 }
@@ -219,17 +221,17 @@ public class MediaRepositoryImpl implements MediaRepository {
                 fos.write(bytes);
                 fos.close();
                 response.close();
-                Log.d(TAG, "Downloaded video to: " + file.getAbsolutePath() + ", Size: " + file.length() + " bytes");
+                CustomLogger.d(TAG, "Downloaded video to: " + file.getAbsolutePath() + ", Size: " + file.length() + " bytes");
 
                 if (!file.canRead() || file.length() == 0 || !isValidVideoFile(file)) {
-                    Log.e(TAG, "Downloaded video is unreadable, empty, or invalid: " + file.getAbsolutePath());
+                    CustomLogger.d(TAG, "Downloaded video is unreadable, empty, or invalid: " + file.getAbsolutePath());
                     file.delete();
                     return null;
                 }
 
                 return file.getAbsolutePath();
             } catch (IOException e) {
-                Log.e(TAG, "Error downloading video for media ID: " + mediaId + ", URL: " + url + ", Attempt: " + (attempt + 1), e);
+                CustomLogger.e(TAG, "Error downloading video for media ID: " + mediaId + ", URL: " + url + ", Attempt: " + (attempt + 1), e);
                 if (attempt < MAX_DOWNLOAD_RETRIES) {
                     try {
                         Thread.sleep(BASE_RETRY_DELAY_MS * (1 << attempt));
@@ -240,7 +242,7 @@ public class MediaRepositoryImpl implements MediaRepository {
                 }
             }
         }
-        Log.e(TAG, "Failed to download video for media ID: " + mediaId + " after " + MAX_DOWNLOAD_RETRIES + " attempts");
+        CustomLogger.d(TAG, "Failed to download video for media ID: " + mediaId + " after " + MAX_DOWNLOAD_RETRIES + " attempts");
         return null;
     }
 
@@ -251,10 +253,10 @@ public class MediaRepositoryImpl implements MediaRepository {
             String duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
             retriever.release();
             boolean isValid = duration != null && Long.parseLong(duration) > 0;
-            Log.d(TAG, "Video file validation: " + file.getAbsolutePath() + ", Valid: " + isValid);
+            CustomLogger.d(TAG, "Video file validation: " + file.getAbsolutePath() + ", Valid: " + isValid);
             return isValid;
         } catch (Exception e) {
-            Log.e(TAG, "Invalid video file: " + file.getAbsolutePath(), e);
+            CustomLogger.e(TAG, "Invalid video file: " + file.getAbsolutePath(), e);
             return false;
         }
     }
@@ -262,6 +264,7 @@ public class MediaRepositoryImpl implements MediaRepository {
     private boolean isNetworkAvailable() {
         ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
         NetworkInfo networkInfo = cm.getActiveNetworkInfo();
+        CustomLogger.d(TAG, "Network available: " + (networkInfo != null && networkInfo.isConnected()));
         return networkInfo != null && networkInfo.isConnected();
     }
 
@@ -271,17 +274,17 @@ public class MediaRepositoryImpl implements MediaRepository {
             for (MediaWithUrls item : mediaWithUrls) {
                 MediaEntity entity = item.media;
                 if (entity.localFilePath != null && !isValidVideoFile(new File(entity.localFilePath))) {
-                    Log.w(TAG, "Invalid or missing cached file for media ID: " + entity.id + ", Path: " + entity.localFilePath);
+                    CustomLogger.w(TAG, "Invalid or missing cached file for media ID: " + entity.id + ", Path: " + entity.localFilePath);
                     entity.localFilePath = null;
                     mediaDao.insertAll(List.of(entity));
-                    Log.d(TAG, "Cleared invalid localFilePath for media ID: " + entity.id);
+                    CustomLogger.d(TAG, "Cleared invalid localFilePath for media ID: " + entity.id);
                 }
                 for (MediaUrlEntity urlEntity : item.urls) {
                     if (urlEntity.localFilePath != null && !isValidVideoFile(new File(urlEntity.localFilePath))) {
-                        Log.w(TAG, "Invalid or missing cached file for media URL ID: " + urlEntity.id + ", Path: " + urlEntity.localFilePath);
+                        CustomLogger.w(TAG, "Invalid or missing cached file for media URL ID: " + urlEntity.id + ", Path: " + urlEntity.localFilePath);
                         urlEntity.localFilePath = null;
                         mediaDao.insertUrls(List.of(urlEntity));
-                        Log.d(TAG, "Cleared invalid localFilePath for media URL ID: " + urlEntity.id);
+                        CustomLogger.d(TAG, "Cleared invalid localFilePath for media URL ID: " + urlEntity.id);
                     }
                 }
             }

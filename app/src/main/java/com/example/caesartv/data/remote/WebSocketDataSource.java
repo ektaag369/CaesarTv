@@ -6,6 +6,8 @@ import android.net.NetworkInfo;
 import android.os.Build;
 import android.provider.Settings;
 import android.util.Log;
+
+import com.example.caesartv.CustomLogger;
 import com.example.caesartv.domain.model.MediaItem;
 import com.example.caesartv.domain.model.MediaUrl;
 import io.socket.client.IO;
@@ -45,7 +47,7 @@ public class WebSocketDataSource {
 
     public void connect(OnMediaFetchedListener listener, Runnable onBlocked, Runnable onError) {
         if (!isNetworkAvailable()) {
-            Log.w(TAG, "No network available, skipping WebSocket connection");
+            CustomLogger.w(TAG, "No network available, skipping WebSocket connection");
             onError.run();
             return;
         }
@@ -56,7 +58,7 @@ public class WebSocketDataSource {
             socket = IO.socket(WEBSOCKET_URL, options);
 
             socket.on(Socket.EVENT_CONNECT, args -> {
-                Log.d(TAG, "WebSocket connected");
+                CustomLogger.d(TAG, "WebSocket connected");
                 retryCount = 0;
                 socketHasReceivedMedia = false;
                 JSONObject deviceInfo = new JSONObject();
@@ -64,75 +66,58 @@ public class WebSocketDataSource {
                     deviceInfo.put("deviceId", getDeviceId());
                     deviceInfo.put("deviceName", getDeviceName());
                     socket.emit("register_tv", deviceInfo);
-                    Log.d(TAG, "Emitted register_tv with deviceInfo: " + deviceInfo);
+                    CustomLogger.d(TAG, "Emitted register_tv with deviceInfo: " + deviceInfo);
                     // Schedule timeout for media fetch
                     new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
                         if (socket != null && socket.connected() && !socketHasReceivedMedia) {
-                            Log.w(TAG, "Timeout waiting for media");
+                            CustomLogger.w(TAG, "Timeout waiting for media");
                             onError.run();
                         }
                     }, MEDIA_TIMEOUT_MS);
                 } catch (Exception e) {
-                    Log.e(TAG, "Error emitting register_tv", e);
+                    CustomLogger.e(TAG, "Error emitting register_tv", e);
                     onError.run();
                 }
             });
 
             socket.on("registered_success", args -> {
-                Log.d(TAG, "Device registered successfully, raw response: " + args[0]);
+                CustomLogger.d(TAG, "Device registered successfully, raw response: " + args[0]);
                 try {
                     JSONObject data = (JSONObject) args[0];
                     String deviceId = data.optString("deviceId", getDeviceId());
-                    Log.d(TAG, "Fetching media from API for deviceId: " + deviceId);
+                    CustomLogger.d(TAG, "Fetching media from API for deviceId: " + deviceId);
                     fetchMediaFromApiWithRetry(deviceId, listener, 0);
                 } catch (Exception e) {
-                    Log.e(TAG, "Error processing registered_success", e);
+                    CustomLogger.e(TAG, "Error processing registered_success", e);
                     onError.run();
                 }
             });
 
             socket.on("registered_failed", args -> {
-                Log.w(TAG, "Device registration failed: " + args[0]);
+                CustomLogger.w(TAG, "Device registration failed: " + args[0]);
                 onError.run();
             });
 
             socket.on("latest_all_media", args -> {
-//                socketHasReceivedMedia = true;
-//                Log.d(TAG, "Received latest_all_media, raw response: " + args[0]);
-//                try {
-//                    JSONObject data = (JSONObject) args[0];
-//                    List<MediaItem> mediaList = parseMediaData(data);
-//                    if (!mediaList.isEmpty()) {
-//                        listener.onMediaFetched(mediaList);
-//                        Log.d(TAG, "Fetched " + mediaList.size() + " media items from latest_all_media: " +
-//                                getMediaIds(mediaList));
-//                    } else {
-//                        Log.w(TAG, "No active media in latest_all_media");
-//                        onError.run();
-//                    }
-//                } catch (Exception e) {
-//                    Log.e(TAG, "Error parsing latest_all_media", e);
-//                    onError.run();
-//                }
-                Log.d(TAG, "Device latest_media successfully, raw response: " + args[0]);
+                CustomLogger.d(TAG, "Device latest_media successfully, raw response: " + args[0]);
                 try {
                     JSONObject data = (JSONObject) args[0];
                     String deviceId = data.optString("deviceId", getDeviceId());
-                    Log.d(TAG, "Fetching media from API for deviceId: " + deviceId);
+                    CustomLogger.d(TAG, "Fetching media from API for deviceId: " + deviceId);
                     fetchMediaFromApiWithRetry(deviceId, listener, 0);
                 } catch (Exception e) {
-                    Log.e(TAG, "Error processing registered_success", e);
+                    CustomLogger.e(TAG, "Error processing registered_success", e);
                     onError.run();
                 }
             });
 
             socket.on("blocked_device", args -> {
-                Log.w(TAG, "Device blocked: " + args[0]);
+                CustomLogger.w(TAG, "Device blocked: " + args[0]);
                 onBlocked.run();
             });
 
             socket.on("unblocked_device", args -> {
-                Log.d(TAG, "Device unblocked, fetching media");
+                CustomLogger.d(TAG, "Device unblocked, fetching media");
                 // Notify MainViewmodel to update isDeviceBlocked
                 onError.run(); // Temporarily trigger onError to reset blocked state
                 // Fetch media from API with retry
@@ -140,40 +125,40 @@ public class WebSocketDataSource {
             });
 
             socket.on(Socket.EVENT_CONNECT_ERROR, args -> {
-                Log.e(TAG, "WebSocket connection error: " + args[0]);
+                CustomLogger.d(TAG, "WebSocket connection error: " + args[0]);
                 retryConnection(listener, onBlocked, onError);
             });
 
             socket.on(Socket.EVENT_DISCONNECT, args -> {
-                Log.w(TAG, "WebSocket disconnected: " + args[0]);
+                CustomLogger.w(TAG, "WebSocket disconnected: " + args[0]);
                 retryConnection(listener, onBlocked, onError);
             });
 
-            Log.d(TAG, "Connecting to WebSocket");
+            CustomLogger.d(TAG, "Connecting to WebSocket");
             socket.connect();
         } catch (URISyntaxException e) {
-            Log.e(TAG, "WebSocket URI error", e);
+            CustomLogger.e(TAG, "WebSocket URI error", e);
             onError.run();
         }
     }
 
     private void fetchMediaFromApiWithRetry(String deviceId, OnMediaFetchedListener listener, int attempt) {
         if (attempt >= MAX_RETRIES) {
-            Log.e(TAG, "Max retries reached for API fetch, deviceId: " + deviceId);
+            CustomLogger.d(TAG, "Max retries reached for API fetch, deviceId: " + deviceId);
             return;
         }
         if (!isNetworkAvailable()) {
-            Log.w(TAG, "No network available for API fetch, deviceId: " + deviceId);
+            CustomLogger.w(TAG, "No network available for API fetch, deviceId: " + deviceId);
             retryApiFetch(deviceId, listener, attempt + 1);
             return;
         }
         try {
             String apiUrl = API_BASE_URL + deviceId + "?page=1&limit=10";
-            Log.d(TAG, "Fetching media from: " + apiUrl + ", attempt: " + (attempt + 1));
+            CustomLogger.d(TAG, "Fetching media from: " + apiUrl + ", attempt: " + (attempt + 1));
             Request request = new Request.Builder().url(apiUrl).build();
             Response response = client.newCall(request).execute();
             if (!response.isSuccessful()) {
-                Log.e(TAG, "Failed to fetch media from API, HTTP code: " + response.code() + ", attempt: " + (attempt + 1));
+                CustomLogger.d(TAG, "Failed to fetch media from API, HTTP code: " + response.code() + ", attempt: " + (attempt + 1));
                 response.close();
                 retryApiFetch(deviceId, listener, attempt + 1);
                 return;
@@ -185,24 +170,24 @@ public class WebSocketDataSource {
             if (!mediaList.isEmpty()) {
                 socketHasReceivedMedia = true;
                 listener.onMediaFetched(mediaList);
-                Log.d(TAG, "Successfully fetched " + mediaList.size() + " media items from API: " + getMediaIds(mediaList));
+                CustomLogger.d(TAG, "Successfully fetched " + mediaList.size() + " media items from API: " + getMediaIds(mediaList));
             } else {
-                Log.w(TAG, "No active media from API, attempt: " + (attempt + 1));
+                CustomLogger.w(TAG, "No active media from API, attempt: " + (attempt + 1));
                 retryApiFetch(deviceId, listener, attempt + 1);
             }
         } catch (Exception e) {
-            Log.e(TAG, "Error fetching media from API, attempt: " + (attempt + 1), e);
+            CustomLogger.e(TAG, "Error fetching media from API, attempt: " + (attempt + 1), e);
             retryApiFetch(deviceId, listener, attempt + 1);
         }
     }
 
     private void retryApiFetch(String deviceId, OnMediaFetchedListener listener, int attempt) {
         if (attempt >= MAX_RETRIES) {
-            Log.e(TAG, "Max API fetch retries reached for deviceId: " + deviceId);
+            CustomLogger.d(TAG, "Max API fetch retries reached for deviceId: " + deviceId);
             return;
         }
         long delay = API_RETRY_DELAY_MS * (1 << (attempt - 1)); // Exponential backoff: 2s, 4s, 8s
-        Log.d(TAG, "Retrying API fetch, attempt " + attempt + "/" + MAX_RETRIES + ", delay: " + delay + "ms");
+        CustomLogger.d(TAG, "Retrying API fetch, attempt " + attempt + "/" + MAX_RETRIES + ", delay: " + delay + "ms");
         new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
             fetchMediaFromApiWithRetry(deviceId, listener, attempt);
         }, delay);
@@ -213,17 +198,17 @@ public class WebSocketDataSource {
         try {
             String status = data.optString("status", "");
             if (!"success".equals(status)) {
-                Log.w(TAG, "API response status is not success: " + status);
+                CustomLogger.w(TAG, "API response status is not success: " + status);
                 return mediaList;
             }
             JSONObject outerData = data.optJSONObject("data");
             if (outerData == null) {
-                Log.w(TAG, "No 'data' field in API response");
+                CustomLogger.w(TAG, "No 'data' field in API response");
                 return mediaList;
             }
             JSONArray mediaAllData = outerData.optJSONArray("mediaAllData");
             if (mediaAllData == null) {
-                Log.w(TAG, "No 'data.mediaAllData' field in API response");
+                CustomLogger.w(TAG, "No 'data.mediaAllData' field in API response");
                 return mediaList;
             }
             for (int i = 0; i < mediaAllData.length(); i++) {
@@ -233,6 +218,7 @@ public class WebSocketDataSource {
                 if (multipleUrlArray != null) {
                     for (int j = 0; j < multipleUrlArray.length(); j++) {
                         JSONObject urlItem = multipleUrlArray.getJSONObject(j);
+                        CustomLogger.d(TAG, "Parsed URL item: " + urlItem.toString());
                         multipleUrl.add(new MediaUrl(
                                 urlItem.optString("urlType", ""),
                                 urlItem.optString("url", ""),
@@ -256,11 +242,11 @@ public class WebSocketDataSource {
                 );
                 if (media.isActive()) {
                     mediaList.add(media);
-                    Log.d(TAG, "Added active media from API: " + media.getTitle() + ", URL: " + media.getUrl() + ", Duration: " + media.getDuration());
+                    CustomLogger.d(TAG, "Added active media from API: " + media.getTitle() + ", URL: " + media.getUrl() + ", Duration: " + media.getDuration());
                 }
             }
         } catch (Exception e) {
-            Log.e(TAG, "Error parsing API response", e);
+            CustomLogger.e(TAG, "Error parsing API response", e);
         }
         return mediaList;
     }
@@ -270,17 +256,17 @@ public class WebSocketDataSource {
         try {
             JSONObject outerData = data.optJSONObject("data");
             if (outerData == null) {
-                Log.w(TAG, "No 'data' field in latest_all_media response");
+                CustomLogger.w(TAG, "No 'data' field in latest_all_media response");
                 return mediaList;
             }
             JSONObject innerData = outerData.optJSONObject("data");
             if (innerData == null) {
-                Log.w(TAG, "No 'data.data' field in latest_all_media response");
+                CustomLogger.w(TAG, "No 'data.data' field in latest_all_media response");
                 return mediaList;
             }
             JSONArray mediaAllData = innerData.optJSONArray("mediaAllData");
             if (mediaAllData == null) {
-                Log.w(TAG, "No 'data.data.mediaAllData' field in latest_all_media response");
+                CustomLogger.w(TAG, "No 'data.data.mediaAllData' field in latest_all_media response");
                 return mediaList;
             }
             for (int i = 0; i < mediaAllData.length(); i++) {
@@ -313,11 +299,11 @@ public class WebSocketDataSource {
                 );
                 if (media.isActive()) {
                     mediaList.add(media);
-                    Log.d(TAG, "Added active media from latest_all_media: " + media.getTitle() + ", URL: " + media.getUrl() + ", Duration: " + media.getDuration());
+                    CustomLogger.d(TAG, "Added active media from latest_all_media: " + media.getTitle() + ", URL: " + media.getUrl() + ", Duration: " + media.getDuration());
                 }
             }
         } catch (Exception e) {
-            Log.e(TAG, "Error parsing latest_all_media data", e);
+            CustomLogger.e(TAG, "Error parsing latest_all_media data", e);
         }
         return mediaList;
     }
@@ -326,17 +312,18 @@ public class WebSocketDataSource {
         if (retryCount < MAX_RETRIES && isNetworkAvailable()) {
             retryCount++;
             long delay = 2000 * (1 << (retryCount - 1)); // Exponential backoff: 2s, 4s, 8s
-            Log.d(TAG, "Retrying WebSocket connection, attempt " + retryCount + "/" + MAX_RETRIES + ", delay: " + delay + "ms");
+            CustomLogger.d(TAG, "Retrying WebSocket connection, attempt " + retryCount + "/" + MAX_RETRIES + ", delay: " + delay + "ms");
             new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
                 connect(listener, onBlocked, onError);
             }, delay);
         } else {
-            Log.w(TAG, "Max WebSocket retries reached or no network, triggering onError");
+            CustomLogger.w(TAG, "Max WebSocket retries reached or no network, triggering onError");
             onError.run();
         }
     }
 
     private boolean isNetworkAvailable() {
+        CustomLogger.d(TAG, "Checking network availability");
         ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
         NetworkInfo networkInfo = cm.getActiveNetworkInfo();
         return networkInfo != null && networkInfo.isConnected();
@@ -346,13 +333,13 @@ public class WebSocketDataSource {
         if (socket != null) {
             socket.disconnect();
             socket.close();
-            Log.d(TAG, "WebSocket disconnected and closed");
+            CustomLogger.d(TAG, "WebSocket disconnected and closed");
         }
     }
 
     private String getDeviceId() {
         String deviceId = Settings.Secure.getString(context.getContentResolver(), Settings.Secure.ANDROID_ID);
-        Log.d(TAG, "Device ID: " + deviceId);
+        CustomLogger.d(TAG, "Device ID: " + deviceId);
         return deviceId != null ? deviceId : "unknown_device";
     }
 
@@ -360,7 +347,7 @@ public class WebSocketDataSource {
         String manufacturer = Build.MANUFACTURER;
         String model = Build.MODEL;
         String deviceName = manufacturer + " " + model;
-        Log.d(TAG, "Device Name: " + deviceName);
+        CustomLogger.d(TAG, "Device Name: " + deviceName);
         return deviceName != null && !deviceName.trim().isEmpty() ? deviceName : "Unknown Device";
     }
 
@@ -369,6 +356,7 @@ public class WebSocketDataSource {
         for (MediaItem item : mediaItems) {
             ids.add(item.getId());
         }
+        CustomLogger.d(TAG, "Fetched media IDs: " + ids);
         return ids;
     }
 

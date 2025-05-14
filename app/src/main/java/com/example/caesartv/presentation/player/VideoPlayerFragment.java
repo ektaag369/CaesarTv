@@ -21,6 +21,7 @@ import android.widget.ProgressBar;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.OptIn;
+import androidx.annotation.RequiresApi;
 import androidx.fragment.app.Fragment;
 import androidx.lifecycle.ViewModelProvider;
 import androidx.media3.common.MediaItem;
@@ -33,6 +34,7 @@ import com.bumptech.glide.load.DataSource;
 import com.bumptech.glide.load.engine.GlideException;
 import com.bumptech.glide.request.RequestListener;
 import com.bumptech.glide.request.target.Target;
+import com.example.caesartv.CustomLogger;
 import com.example.caesartv.R;
 import com.example.caesartv.domain.model.MediaUrl;
 import com.example.caesartv.presentation.main.MainActivity;
@@ -80,7 +82,7 @@ public class VideoPlayerFragment extends Fragment {
         splitScreenContainer = view.findViewById(R.id.split_screen_container);
         loadingSpinner = view.findViewById(R.id.loading_spinner);
         loadingSpinner.setVisibility(View.GONE);
-        Log.d(TAG, "View initialized");
+        CustomLogger.d(TAG, "View initialized");
         mainHandler = new Handler(Looper.getMainLooper());
         return view;
     }
@@ -112,17 +114,18 @@ public class VideoPlayerFragment extends Fragment {
 
     private Player.Listener createPlayerListener(String playerName) {
         return new Player.Listener() {
+            @RequiresApi(api = Build.VERSION_CODES.N)
             @Override
             public void onPlaybackStateChanged(int state) {
                 switch (state) {
                     case Player.STATE_BUFFERING:
-                        Log.d(TAG, playerName + ": Buffering");
+                        CustomLogger.d(TAG, playerName + ": Buffering");
                         if (!isFirstPlayback) {
                             loadingSpinner.setVisibility(View.VISIBLE);
                         }
                         break;
                     case Player.STATE_READY:
-                        Log.d(TAG, playerName + ": Ready to play");
+                        CustomLogger.d(TAG, playerName + ": Ready to play");
                         loadingSpinner.setVisibility(View.GONE);
                         if (isFirstPlayback) {
                             isFirstPlayback = false;
@@ -135,11 +138,11 @@ public class VideoPlayerFragment extends Fragment {
                         }
                         break;
                     case Player.STATE_ENDED:
-                        Log.d(TAG, playerName + ": Playback ended");
+                        CustomLogger.d(TAG, playerName + ": Playback ended");
                         loadingSpinner.setVisibility(View.GONE);
                         if (isHandlingMultipleMedia) {
                             multipleMediaCompletionCount++;
-                            Log.d(TAG, playerName + ": Completion count = " + multipleMediaCompletionCount);
+                            CustomLogger.d(TAG, playerName + ": Completion count = " + multipleMediaCompletionCount);
                             if (multipleMediaCompletionCount >= 2 || !hasMultipleVideos()) {
                                 isHandlingMultipleMedia = false;
                                 viewModel.handleVideoEnd();
@@ -153,20 +156,20 @@ public class VideoPlayerFragment extends Fragment {
 
             @Override
             public void onPlayerError(@NonNull androidx.media3.common.PlaybackException error) {
-                Log.e(TAG, playerName + ": ExoPlayer error: " + error.getMessage() + ", Error code: " + error.errorCode, error);
+                CustomLogger.e(TAG, playerName + ": ExoPlayer error: " + error.getMessage() + ", Error code: " + error.errorCode, error);
                 if (error.getCause() != null) {
-                    Log.e(TAG, playerName + ": Error cause: " + error.getCause().getMessage());
+                    CustomLogger.d(TAG, playerName + ": Error cause: " + error.getCause().getMessage());
                 }
                 loadingSpinner.setVisibility(View.GONE);
                 if (error.errorCode == androidx.media3.exoplayer.ExoPlaybackException.ERROR_CODE_DECODER_INIT_FAILED ||
                         error.errorCode == androidx.media3.exoplayer.ExoPlaybackException.ERROR_CODE_DECODING_FAILED) {
-                    Log.w(TAG, playerName + ": Decoder error detected, attempting remote playback");
+                    CustomLogger.w(TAG, playerName + ": Decoder error detected, attempting remote playback");
                     isRetryingMedia = true; // Allow retry with same media ID
                     viewModel.retryCurrentMedia();
                 } else {
                     if (isHandlingMultipleMedia) {
                         multipleMediaCompletionCount++;
-                        Log.d(TAG, playerName + ": Completion count = " + multipleMediaCompletionCount);
+                        CustomLogger.d(TAG, playerName + ": Completion count = " + multipleMediaCompletionCount);
                         if (multipleMediaCompletionCount >= 2 || !hasMultipleVideos()) {
                             isHandlingMultipleMedia = false;
                             viewModel.handleVideoEnd();
@@ -199,7 +202,7 @@ public class VideoPlayerFragment extends Fragment {
 
         viewModel.getCurrentMedia().observe(getViewLifecycleOwner(), media -> {
             if (media == null) {
-                Log.w(TAG, "No media to play, closing app");
+                CustomLogger.w(TAG, "No media to play, closing app");
                 // Ensure players are stopped and released before closing
                 stopAllPlayers();
                 releaseAllPlayers();
@@ -210,21 +213,23 @@ public class VideoPlayerFragment extends Fragment {
                 return;
             }
             if (media.getId().equals(currentMediaId) && !isRetryingMedia) {
-                Log.d(TAG, "Ignoring duplicate media: " + media.getTitle());
+                CustomLogger.d(TAG, "Ignoring duplicate media: " + media.getTitle());
                 return;
             }
             currentMediaId = media.getId();
             isRetryingMedia = false; // Reset retry flag after processing
-            Log.d(TAG, "Processing media: " + media.getTitle() + ", Type: " + media.getMediaType());
+            CustomLogger.d(TAG, "Processing media: " + media.getTitle() + ", Type: " + media.getMediaType());
 
             resetUI();
 
             if ("SINGLE".equals(media.getMediaType())) {
+                CustomLogger.d(TAG, "Playing SINGLE media: " + media.getTitle());
                 handleSingleMedia(media);
             } else if ("MULTIPLE".equals(media.getMediaType())) {
+                CustomLogger.d(TAG, "Playing MULTIPLE media: " + media.getTitle());
                 handleMultipleMedia(media);
             } else {
-                Log.e(TAG, "Unknown media type: " + media.getMediaType());
+                CustomLogger.d(TAG, "Unknown media type: " + media.getMediaType());
                 viewModel.handleVideoEnd();
             }
         });
@@ -245,33 +250,34 @@ public class VideoPlayerFragment extends Fragment {
         // Reset completion tracking
         multipleMediaCompletionCount = 0;
         isHandlingMultipleMedia = false;
+        CustomLogger.d(TAG, "UI reset");
     }
 
     private void handleSingleMedia(com.example.caesartv.domain.model.MediaItem media) {
         playerViewFull.setVisibility(View.VISIBLE);
         String localFilePath = media.getLocalFilePath() != null ? media.getLocalFilePath() : media.getUrl();
-        Log.d(TAG, "Playing SINGLE media: " + media.getTitle() + ", Path: " + localFilePath);
+        CustomLogger.d(TAG, "Playing SINGLE media: " + media.getTitle() + ", Path: " + localFilePath);
 
         File file = new File(localFilePath);
-        Log.d(TAG, "File check: Path=" + localFilePath + ", Exists=" + file.exists() + ", CanRead=" + file.canRead() + ", Size=" + (file.exists() ? file.length() : 0));
+        CustomLogger.d(TAG, "File check: Path=" + localFilePath + ", Exists=" + file.exists() + ", CanRead=" + file.canRead() + ", Size=" + (file.exists() ? file.length() : 0));
 
         if (localFilePath != null && file.exists() && file.canRead()) {
             if (!supports4KDecoding() && isLikely4KVideo(localFilePath)) {
-                Log.w(TAG, "Device does not support 4K for SINGLE media, attempting remote playback");
+                CustomLogger.w(TAG, "Device does not support 4K for SINGLE media, attempting remote playback");
                 attemptRemotePlayback(media, playerFull, playerViewFull, "Full");
             } else {
                 try {
                     playVideoInView(playerFull, playerViewFull, localFilePath, "Full");
                 } catch (Exception e) {
-                    Log.e(TAG, "Failed to play local SINGLE media: " + media.getTitle(), e);
+                    CustomLogger.e(TAG, "Failed to play local SINGLE media: " + media.getTitle(), e);
                     attemptRemotePlayback(media, playerFull, playerViewFull, "Full");
                 }
             }
         } else if (isNetworkAvailable() && media.getUrl() != null) {
-            Log.d(TAG, "Playing remote SINGLE media: " + media.getUrl());
+            CustomLogger.d(TAG, "Playing remote SINGLE media: " + media.getUrl());
             attemptRemotePlayback(media, playerFull, playerViewFull, "Full");
         } else {
-            Log.e(TAG, "Invalid or missing video file for SINGLE media: " + localFilePath);
+            CustomLogger.d(TAG, "Invalid or missing video file for SINGLE media: " + localFilePath);
             viewModel.handleVideoEnd();
         }
     }
@@ -280,7 +286,7 @@ public class VideoPlayerFragment extends Fragment {
         splitScreenContainer.setVisibility(View.VISIBLE);
         List<MediaUrl> multipleUrls = media.getMultipleUrl();
         if (multipleUrls == null || multipleUrls.size() < 2) {
-            Log.e(TAG, "MULTIPLE media requires at least 2 URLs, found: " + (multipleUrls == null ? 0 : multipleUrls.size()));
+            CustomLogger.d(TAG,"MULTIPLE media requires at least 2 URLs, found: " + (multipleUrls == null ? 0 : multipleUrls.size()));
             viewModel.handleVideoEnd();
             return;
         }
@@ -296,28 +302,29 @@ public class VideoPlayerFragment extends Fragment {
         if ("video".equals(leftUrl.getUrlType())) {
             if (leftPath != null) {
                 File leftFile = new File(leftPath);
-                Log.d(TAG, "Left video check: Path=" + leftPath + ", Exists=" + leftFile.exists() + ", CanRead=" + leftFile.canRead() + ", Size=" + (leftFile.exists() ? leftFile.length() : 0));
+                CustomLogger.d(TAG, "Left video check: Path=" + leftPath + ", Exists=" + leftFile.exists() + ", CanRead=" + leftFile.canRead() + ", Size=" + (leftFile.exists() ? leftFile.length() : 0));
                 if (leftFile.exists() && leftFile.canRead()) {
                     if (!supports4K && isLikely4KVideo(leftPath)) {
-                        Log.w(TAG, "Device does not support 4K for Left video, attempting remote playback");
+                        CustomLogger.w(TAG, "Device does not support 4K for Left video, attempting remote playback");
                         attemptRemotePlayback(leftUrl, playerLeft, playerViewLeft, "Left");
                     } else {
                         try {
+                            CustomLogger.d(TAG, "Playing local Left video: " + leftPath);
                             playVideoInView(playerLeft, playerViewLeft, leftPath, "Left");
                         } catch (Exception e) {
-                            Log.e(TAG, "Failed to play local Left video: " + leftPath, e);
+                            CustomLogger.e(TAG, "Failed to play local Left video: " + leftPath, e);
                             attemptRemotePlayback(leftUrl, playerLeft, playerViewLeft, "Left");
                         }
                     }
                 } else if (isNetworkAvailable() && leftUrl.getUrl() != null) {
-                    Log.d(TAG, "Playing remote Left video: " + leftUrl.getUrl());
+                    CustomLogger.d(TAG, "Playing remote Left video: " + leftUrl.getUrl());
                     attemptRemotePlayback(leftUrl, playerLeft, playerViewLeft, "Left");
                 } else {
-                    Log.e(TAG, "Invalid or missing video file for Left: " + leftPath);
+                    CustomLogger.d(TAG, "Invalid or missing video file for Left: " + leftPath);
                     mainHandler.post(() -> {
                         if (isHandlingMultipleMedia) {
                             multipleMediaCompletionCount++;
-                            Log.d(TAG, "Left: Completion count = " + multipleMediaCompletionCount);
+                            CustomLogger.d(TAG, "Left: Completion count = " + multipleMediaCompletionCount);
                             if (multipleMediaCompletionCount >= 2 || !hasMultipleVideos()) {
                                 isHandlingMultipleMedia = false;
                                 viewModel.handleVideoEnd();
@@ -326,20 +333,22 @@ public class VideoPlayerFragment extends Fragment {
                     });
                 }
             } else {
-                Log.w(TAG, "No valid video path for Left");
+                CustomLogger.w(TAG, "No valid video path for Left");
                 mainHandler.post(() -> {
                     if (isHandlingMultipleMedia) {
                         multipleMediaCompletionCount++;
-                        Log.d(TAG, "Left: Completion count = " + multipleMediaCompletionCount);
+                        CustomLogger.d(TAG, "Left: Completion count = " + multipleMediaCompletionCount);
                         if (multipleMediaCompletionCount >= 2 || !hasMultipleVideos()) {
                             isHandlingMultipleMedia = false;
                             viewModel.handleVideoEnd();
+                            CustomLogger.d(TAG, "Left: Completion count = " + multipleMediaCompletionCount);
                         }
                     }
                 });
             }
         } else if ("image".equals(leftUrl.getUrlType())) {
             loadImageInView(imageViewLeft, leftPath, "Left");
+            CustomLogger.d(TAG, "Left: Image loaded");
         }
 
         MediaUrl rightUrl = multipleUrls.get(1);
@@ -347,41 +356,43 @@ public class VideoPlayerFragment extends Fragment {
         if ("video".equals(rightUrl.getUrlType())) {
             if (rightPath != null) {
                 File rightFile = new File(rightPath);
-                Log.d(TAG, "Right video check: Path=" + rightPath + ", Exists=" + rightFile.exists() + ", CanRead=" + rightFile.canRead() + ", Size=" + (rightFile.exists() ? rightFile.length() : 0));
+                CustomLogger.d(TAG, "Right video check: Path=" + rightPath + ", Exists=" + rightFile.exists() + ", CanRead=" + rightFile.canRead() + ", Size=" + (rightFile.exists() ? rightFile.length() : 0));
                 if (rightFile.exists() && rightFile.canRead()) {
                     if (!supports4K && isLikely4KVideo(rightPath)) {
-                        Log.w(TAG, "Device does not support 4K for Right video, attempting remote playback");
+                        CustomLogger.w(TAG, "Device does not support 4K for Right video, attempting remote playback");
                         attemptRemotePlayback(rightUrl, playerRight, playerViewRight, "Right");
                     } else {
                         try {
+                            CustomLogger.d(TAG, "Playing local Right video: " + rightPath);
                             playVideoInView(playerRight, playerViewRight, rightPath, "Right");
                         } catch (Exception e) {
-                            Log.e(TAG, "Failed to play local Right video: " + rightPath, e);
+                            CustomLogger.e(TAG, "Failed to play local Right video: " + rightPath, e);
                             attemptRemotePlayback(rightUrl, playerRight, playerViewRight, "Right");
                         }
                     }
                 } else if (isNetworkAvailable() && rightUrl.getUrl() != null) {
-                    Log.d(TAG, "Playing remote Right video: " + rightUrl.getUrl());
+                    CustomLogger.d(TAG, "Playing remote Right video: " + rightUrl.getUrl());
                     attemptRemotePlayback(rightUrl, playerRight, playerViewRight, "Right");
                 } else {
-                    Log.e(TAG, "Invalid or missing video file for Right: " + rightPath);
+                    CustomLogger.d(TAG, "Invalid or missing video file for Right: " + rightPath);
                     mainHandler.post(() -> {
                         if (isHandlingMultipleMedia) {
                             multipleMediaCompletionCount++;
-                            Log.d(TAG, "Right: Completion count = " + multipleMediaCompletionCount);
+                            CustomLogger.d(TAG, "Right: Completion count = " + multipleMediaCompletionCount);
                             if (multipleMediaCompletionCount >= 2 || !hasMultipleVideos()) {
                                 isHandlingMultipleMedia = false;
                                 viewModel.handleVideoEnd();
+                                CustomLogger.d(TAG, "Right: Completion count = " + multipleMediaCompletionCount);
                             }
                         }
                     });
                 }
             } else {
-                Log.w(TAG, "No valid video path for Right");
+                CustomLogger.w(TAG, "No valid video path for Right");
                 mainHandler.post(() -> {
                     if (isHandlingMultipleMedia) {
                         multipleMediaCompletionCount++;
-                        Log.d(TAG, "Right: Completion count = " + multipleMediaCompletionCount);
+                        CustomLogger.d(TAG, "Right: Completion count = " + multipleMediaCompletionCount);
                         if (multipleMediaCompletionCount >= 2 || !hasMultipleVideos()) {
                             isHandlingMultipleMedia = false;
                             viewModel.handleVideoEnd();
@@ -390,6 +401,7 @@ public class VideoPlayerFragment extends Fragment {
                 });
             }
         } else if ("image".equals(rightUrl.getUrlType())) {
+            CustomLogger.d(TAG, "Right: Image loaded");
             loadImageInView(imageViewRight, rightPath, "Right");
         }
 
@@ -398,7 +410,7 @@ public class VideoPlayerFragment extends Fragment {
         // Add timeout to prevent indefinite stall
         mainHandler.postDelayed(() -> {
             if (isHandlingMultipleMedia && multipleMediaCompletionCount < 2) {
-                Log.w(TAG, "Timeout reached for multiple media, forcing completion");
+                CustomLogger.w(TAG, "Timeout reached for multiple media, forcing completion");
                 isHandlingMultipleMedia = false;
                 multipleMediaCompletionCount = 2;
                 viewModel.handleVideoEnd();
@@ -408,51 +420,53 @@ public class VideoPlayerFragment extends Fragment {
 
     private void attemptRemotePlayback(com.example.caesartv.domain.model.MediaItem media, ExoPlayer player, PlayerView playerView, String viewName) {
         if (media.getUrl() == null) {
-            Log.e(TAG, "No remote URL available for media: " + media.getTitle() + " in " + viewName);
+            CustomLogger.d(TAG, "No remote URL available for media: " + media.getTitle() + " in " + viewName);
             viewModel.handleVideoEnd();
             return;
         }
-        Log.d(TAG, "Attempting remote playback in " + viewName + ": " + media.getUrl());
+        CustomLogger.d(TAG, "Attempting remote playback in " + viewName + ": " + media.getUrl());
         try {
             playVideoInView(player, playerView, media.getUrl(), viewName);
         } catch (Exception e) {
-            Log.e(TAG, "Failed to play remote media in " + viewName + ": " + media.getTitle(), e);
+            CustomLogger.e(TAG, "Failed to play remote media in " + viewName + ": " + media.getTitle(), e);
             viewModel.handleVideoEnd();
         }
     }
 
     private void attemptRemotePlayback(MediaUrl mediaUrl, ExoPlayer player, PlayerView playerView, String viewName) {
         if (mediaUrl.getUrl() == null) {
-            Log.e(TAG, "No remote URL available for media URL in " + viewName);
+            CustomLogger.d(TAG, "No remote URL available for media URL in " + viewName);
             if (isHandlingMultipleMedia) {
                 mainHandler.post(() -> {
                     multipleMediaCompletionCount++;
-                    Log.d(TAG, viewName + ": Completion count = " + multipleMediaCompletionCount);
+                    CustomLogger.d(TAG, viewName + ": Completion count = " + multipleMediaCompletionCount);
                     if (multipleMediaCompletionCount >= 2 || !hasMultipleVideos()) {
                         isHandlingMultipleMedia = false;
                         viewModel.handleVideoEnd();
                     }
                 });
             } else {
+                CustomLogger.d(TAG, "No remote URL available for media URL in " + viewName);
                 viewModel.handleVideoEnd();
             }
             return;
         }
-        Log.d(TAG, "Attempting remote playback in " + viewName + ": " + mediaUrl.getUrl());
+        CustomLogger.d(TAG, "Attempting remote playback in " + viewName + ": " + mediaUrl.getUrl());
         try {
             playVideoInView(player, playerView, mediaUrl.getUrl(), viewName);
         } catch (Exception e) {
-            Log.e(TAG, "Failed to play remote media URL in " + viewName + ": " + mediaUrl.getUrl(), e);
+            CustomLogger.e(TAG, "Failed to play remote media URL in " + viewName + ": " + mediaUrl.getUrl(), e);
             if (isHandlingMultipleMedia) {
                 mainHandler.post(() -> {
                     multipleMediaCompletionCount++;
-                    Log.d(TAG, viewName + ": Completion count = " + multipleMediaCompletionCount);
+                    CustomLogger.d(TAG, viewName + ": Completion count = " + multipleMediaCompletionCount);
                     if (multipleMediaCompletionCount >= 2 || !hasMultipleVideos()) {
                         isHandlingMultipleMedia = false;
                         viewModel.handleVideoEnd();
                     }
                 });
             } else {
+                CustomLogger.d(TAG, "No remote URL available for media URL in " + viewName);
                 viewModel.handleVideoEnd();
             }
         }
@@ -460,7 +474,7 @@ public class VideoPlayerFragment extends Fragment {
 
     private void playVideoInView(ExoPlayer player, PlayerView playerView, String path, String viewName) {
         playerView.setVisibility(View.VISIBLE);
-        Log.d(TAG, "Playing video in " + viewName + ": " + path);
+        CustomLogger.d(TAG, "Playing video in " + viewName + ": " + path);
         Uri uri = path.startsWith("/") ? Uri.fromFile(new File(path)) : Uri.parse(path);
         MediaItem mediaItem = MediaItem.fromUri(uri);
         player.stop();
@@ -472,7 +486,7 @@ public class VideoPlayerFragment extends Fragment {
 
     private void loadImageInView(ImageView imageView, String url, String viewName) {
         imageView.setVisibility(View.VISIBLE);
-        Log.d(TAG, "Loading image in " + viewName + ": " + url);
+        CustomLogger.d(TAG, "Loading image in " + viewName + ": " + url);
         try {
             Glide.with(this)
                     .load(url)
@@ -480,11 +494,11 @@ public class VideoPlayerFragment extends Fragment {
                     .listener(new RequestListener<Drawable>() {
                         @Override
                         public boolean onLoadFailed(@Nullable GlideException e, Object model, Target<Drawable> target, boolean isFirstResource) {
-                            Log.e(TAG, "Failed to load image in " + viewName + ": " + url, e);
+                            CustomLogger.e(TAG, "Failed to load image in " + viewName + ": " + url, e);
                             mainHandler.post(() -> {
                                 if (isHandlingMultipleMedia) {
                                     multipleMediaCompletionCount++;
-                                    Log.d(TAG, viewName + ": Completion count = " + multipleMediaCompletionCount);
+                                    CustomLogger.d(TAG, viewName + ": Completion count = " + multipleMediaCompletionCount);
                                     if (multipleMediaCompletionCount >= 2 || !hasMultipleVideos()) {
                                         isHandlingMultipleMedia = false;
                                         viewModel.handleVideoEnd();
@@ -498,17 +512,18 @@ public class VideoPlayerFragment extends Fragment {
 
                         @Override
                         public boolean onResourceReady(Drawable resource, Object model, Target<Drawable> target, DataSource dataSource, boolean isFirstResource) {
-                            Log.d(TAG, "Image loaded in " + viewName + ": " + url);
+                            CustomLogger.d(TAG, "Image loaded in " + viewName + ": " + url);
                             mainHandler.postDelayed(() -> {
-                                Log.d(TAG, "Image display completed in " + viewName);
+                                CustomLogger.d(TAG, "Image display completed in " + viewName);
                                 if (isHandlingMultipleMedia) {
                                     multipleMediaCompletionCount++;
-                                    Log.d(TAG, viewName + ": Completion count = " + multipleMediaCompletionCount);
+                                    CustomLogger.d(TAG, viewName + ": Completion count = " + multipleMediaCompletionCount);
                                     if (multipleMediaCompletionCount >= 2 || !hasMultipleVideos()) {
                                         isHandlingMultipleMedia = false;
                                         viewModel.handleVideoEnd();
                                     }
                                 } else {
+                                    CustomLogger.d(TAG, "Image display completed in " + viewName);
                                     viewModel.handleVideoEnd();
                                 }
                             }, 3000);
@@ -517,16 +532,17 @@ public class VideoPlayerFragment extends Fragment {
                     })
                     .into(imageView);
         } catch (Exception e) {
-            Log.e(TAG, "Failed to load image in " + viewName + ": " + url, e);
+            CustomLogger.e(TAG, "Failed to load image in " + viewName + ": " + url, e);
             mainHandler.post(() -> {
                 if (isHandlingMultipleMedia) {
                     multipleMediaCompletionCount++;
-                    Log.d(TAG, viewName + ": Completion count = " + multipleMediaCompletionCount);
+                    CustomLogger.d(TAG, viewName + ": Completion count = " + multipleMediaCompletionCount);
                     if (multipleMediaCompletionCount >= 2 || !hasMultipleVideos()) {
                         isHandlingMultipleMedia = false;
                         viewModel.handleVideoEnd();
                     }
                 } else {
+                    CustomLogger.d(TAG, "Image display completed in " + viewName);
                     viewModel.handleVideoEnd();
                 }
             });
@@ -536,6 +552,7 @@ public class VideoPlayerFragment extends Fragment {
     private boolean isNetworkAvailable() {
         ConnectivityManager cm = (ConnectivityManager) requireContext().getSystemService(Context.CONNECTIVITY_SERVICE);
         NetworkInfo networkInfo = cm.getActiveNetworkInfo();
+        CustomLogger.d(TAG, "Network check: Available=" + (networkInfo != null && networkInfo.isConnected()));
         return networkInfo != null && networkInfo.isConnected();
     }
 
@@ -547,33 +564,33 @@ public class VideoPlayerFragment extends Fragment {
                 if (type.equals("video/avc")) {
                     MediaCodecInfo.CodecCapabilities caps = codecInfo.getCapabilitiesForType(type);
                     if (caps.getVideoCapabilities().areSizeAndRateSupported(3840, 2160, 30)) {
-                        Log.d(TAG, "Device supports 4K H.264 decoding");
+                        CustomLogger.d(TAG, "Device supports 4K H.264 decoding");
                         return true;
                     }
                 }
             }
         }
-        Log.d(TAG, "Device does not support 4K H.264 decoding");
+        CustomLogger.d(TAG, "Device does not support 4K H.264 decoding");
         return false;
     }
 
     private boolean isLikely4KVideo(String path) {
         if (path == null) {
-            Log.d(TAG, "Video path is null, assuming not 4K");
+            CustomLogger.d(TAG, "Video path is null, assuming not 4K");
             return false;
         }
         if (path.startsWith("http")) {
-            Log.d(TAG, "Remote URL detected, assuming 4K: " + path);
+            CustomLogger.d(TAG, "Remote URL detected, assuming 4K: " + path);
             return true; // Assume remote URLs are 4K to force remote playback
         }
         File file = new File(path);
         if (file.exists()) {
             long size = file.length();
             boolean isLarge = size > 50 * 1024 * 1024; // 50MB threshold
-            Log.d(TAG, "Video size check: Path=" + path + ", Size=" + size + ", Likely 4K=" + isLarge);
+            CustomLogger.d(TAG, "Video size check: Path=" + path + ", Size=" + size + ", Likely 4K=" + isLarge);
             return isLarge;
         }
-        Log.d(TAG, "Video file does not exist: " + path);
+        CustomLogger.d(TAG, "Video file does not exist: " + path);
         return false;
     }
 
@@ -582,7 +599,7 @@ public class VideoPlayerFragment extends Fragment {
         super.onPause();
         pauseAllPlayers();
         loadingSpinner.setVisibility(View.GONE);
-        Log.d(TAG, "Fragment paused");
+        CustomLogger.d(TAG, "Fragment paused");
     }
 
     public void pauseVideo() {
@@ -592,15 +609,15 @@ public class VideoPlayerFragment extends Fragment {
     private void pauseAllPlayers() {
         if (playerFull != null) {
             playerFull.pause();
-            Log.d(TAG, "Full player paused");
+            CustomLogger.d(TAG, "Full player paused");
         }
         if (playerLeft != null) {
             playerLeft.pause();
-            Log.d(TAG, "Left player paused");
+            CustomLogger.d(TAG, "Left player paused");
         }
         if (playerRight != null) {
             playerRight.pause();
-            Log.d(TAG, "Right player paused");
+            CustomLogger.d(TAG, "Right player paused");
         }
     }
 
@@ -608,17 +625,17 @@ public class VideoPlayerFragment extends Fragment {
         if (playerFull != null) {
             playerFull.stop();
             playerFull.clearMediaItems();
-            Log.d(TAG, "Full player stopped");
+            CustomLogger.d(TAG, "Full player stopped");
         }
         if (playerLeft != null) {
             playerLeft.stop();
             playerLeft.clearMediaItems();
-            Log.d(TAG, "Left player stopped");
+            CustomLogger.d(TAG, "Left player stopped");
         }
         if (playerRight != null) {
             playerRight.stop();
             playerRight.clearMediaItems();
-            Log.d(TAG, "Right player stopped");
+            CustomLogger.d(TAG, "Right player stopped");
         }
     }
 
@@ -629,24 +646,24 @@ public class VideoPlayerFragment extends Fragment {
         releaseAllPlayers();
         loadingSpinner.setVisibility(View.GONE);
         mainHandler.removeCallbacksAndMessages(null);
-        Log.d(TAG, "View destroyed");
+        CustomLogger.d(TAG, "View destroyed");
     }
 
     private void releaseAllPlayers() {
         if (playerFull != null) {
             playerFull.release();
             playerFull = null;
-            Log.d(TAG, "Full player released");
+            CustomLogger.d(TAG, "Full player released");
         }
         if (playerLeft != null) {
             playerLeft.release();
             playerLeft = null;
-            Log.d(TAG, "Left player released");
+            CustomLogger.d(TAG, "Left player released");
         }
         if (playerRight != null) {
             playerRight.release();
             playerRight = null;
-            Log.d(TAG, "Right player released");
+            CustomLogger.d(TAG, "Right player released");
         }
     }
 
@@ -656,6 +673,6 @@ public class VideoPlayerFragment extends Fragment {
         stopAllPlayers();
         releaseAllPlayers();
         mainHandler.removeCallbacksAndMessages(null);
-        Log.d(TAG, "Fragment destroyed");
+        CustomLogger.d(TAG, "Fragment destroyed");
     }
 }

@@ -1,5 +1,6 @@
 package com.example.caesartv.presentation.main;
 
+import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -7,6 +8,8 @@ import android.util.Log;
 import android.view.View;
 import android.widget.ImageView;
 import androidx.appcompat.app.AppCompatActivity;
+
+import com.example.caesartv.CustomLogger;
 import com.example.caesartv.R;
 import com.example.caesartv.data.repository.MediaRepositoryImpl;
 import com.example.caesartv.di.AppModule;
@@ -19,7 +22,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 public class MainActivity extends AppCompatActivity {
-
     private static final String TAG = "MainActivity";
     private MainViewmodel viewModel;
     private Handler mainHandler;
@@ -32,6 +34,10 @@ public class MainActivity extends AppCompatActivity {
     private static final long BLOCKED_CLOSE_DELAY_MS = 3000; // 3s delay before closing
     private boolean isDeviceBlocked = false;
     private ImageView splashLogo;
+
+    // Double back press logic
+    private static final long DOUBLE_BACK_PRESS_INTERVAL = 2000; // 2s interval
+    private long lastBackPressTime = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -50,7 +56,7 @@ public class MainActivity extends AppCompatActivity {
         // Show splash screen
         splashLogo = findViewById(R.id.splash_logo);
         splashLogo.setVisibility(View.VISIBLE);
-        Log.d(TAG, "Splash screen displayed");
+        CustomLogger.d(TAG,"Splash screen displayed");
 
         // Initialize in background
         executorService.execute(() -> {
@@ -59,10 +65,10 @@ public class MainActivity extends AppCompatActivity {
                 mainHandler.post(() -> {
                     isSplashDisplayed = false;
                     splashLogo.setVisibility(View.GONE);
-                    Log.d(TAG, "Splash screen hidden after video ready");
+                    CustomLogger.d(TAG,"Splash screen hidden after video ready");
                 });
             });
-            Log.d(TAG, "VideoPlayerFragment preloaded");
+            CustomLogger.d(TAG, "VideoPlayerFragment preloaded");
 
             // Start WebSocket and check media
             viewModel.connectWebSocket();
@@ -79,18 +85,18 @@ public class MainActivity extends AppCompatActivity {
         if (isDeviceBlocked) {
             setContentView(R.layout.activity_blocked);
             splashLogo.setVisibility(View.GONE);
-            Log.w(TAG, "Device is blocked, showing blocked screen");
+            CustomLogger.w(TAG, "Device is blocked, showing blocked screen");
             // Remove VideoPlayerFragment if it exists
             if (videoPlayerFragment != null && videoPlayerFragment.isAdded()) {
                 getSupportFragmentManager()
                         .beginTransaction()
                         .remove(videoPlayerFragment)
                         .commit();
-                Log.d(TAG, "VideoPlayerFragment removed due to device block");
+                CustomLogger.d(TAG, "VideoPlayerFragment removed due to device block");
             }
             // Close app after 3 seconds
             mainHandler.postDelayed(this::finish, BLOCKED_CLOSE_DELAY_MS);
-            Log.d(TAG, "Scheduled app closure in " + BLOCKED_CLOSE_DELAY_MS + "ms");
+            CustomLogger.d(TAG, "Scheduled app closure in " + BLOCKED_CLOSE_DELAY_MS + "ms");
         } else {
             setContentView(R.layout.activity_main);
             // Reinitialize splash logo since layout is reset
@@ -98,20 +104,21 @@ public class MainActivity extends AppCompatActivity {
             splashLogo.setVisibility(View.VISIBLE);
             checkCachedMediaAndStartVideoPlayer();
             observeViewModel();
+            CustomLogger.d(TAG, "Device unblocked, resuming normal flow");
         }
     }
 
     private void checkCachedMediaAndStartVideoPlayer() {
-        Log.d(TAG, "Checking cached media");
+        CustomLogger.d(TAG, "Checking cached media");
         executorService.execute(() -> {
             List<MediaItem> cachedMedia = cachedMediaUseCase.execute();
             mainHandler.post(() -> {
                 if (!cachedMedia.isEmpty()) {
-                    Log.d(TAG, "Cached media available: " + cachedMedia.size() + " items");
+                    CustomLogger.d(TAG, "Cached media available: " + cachedMedia.size() + " items");
                     viewModel.getMediaItems().postValue(cachedMedia);
                     startVideoPlayer();
                 } else {
-                    Log.d(TAG, "No cached media, waiting for API media");
+                    CustomLogger.d(TAG, "No cached media, waiting for API media");
                     waitForMediaAndStartVideoPlayer();
                 }
             });
@@ -119,23 +126,23 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void waitForMediaAndStartVideoPlayer() {
-        Log.d(TAG, "Waiting for media items");
+        CustomLogger.d(TAG, "Waiting for media items");
         long startTime = System.currentTimeMillis();
         Runnable checkMedia = new Runnable() {
             @Override
             public void run() {
                 if (isDeviceBlocked) {
-                    Log.d(TAG, "Device is blocked, skipping media check");
+                    CustomLogger.d(TAG, "Device is blocked, skipping media check");
                     return;
                 }
                 if (viewModel.getMediaItems().getValue() != null && !viewModel.getMediaItems().getValue().isEmpty()) {
-                    Log.d(TAG, "Media items available: " + viewModel.getMediaItems().getValue().size());
+                    CustomLogger.d(TAG, "Media items available: " + viewModel.getMediaItems().getValue().size());
                     startVideoPlayer();
                 } else if (System.currentTimeMillis() - startTime < MEDIA_CHECK_TIMEOUT_MS) {
-                    Log.d(TAG, "No media yet, retrying...");
+                    CustomLogger.d(TAG, "No media yet, retrying...");
                     mainHandler.postDelayed(this, 500);
                 } else {
-                    Log.w(TAG, "Media fetch timeout, checking cached media");
+                    CustomLogger.w(TAG, "Media fetch timeout, checking cached media");
                     checkCachedMediaAndStartVideoPlayer();
                 }
             }
@@ -145,23 +152,23 @@ public class MainActivity extends AppCompatActivity {
 
     private void observeViewModel() {
         viewModel.getMediaItems().observe(this, mediaItems -> {
-            Log.d(TAG, "mediaItems received: " + (mediaItems != null ? mediaItems.size() : "null"));
+            CustomLogger.d(TAG, "mediaItems received: " + (mediaItems != null ? mediaItems.size() : "null"));
             if (mediaItems != null && !mediaItems.isEmpty() && !isSplashDisplayed && !isDeviceBlocked) {
-                Log.d(TAG, "Media items received, starting VideoPlayerFragment");
+                CustomLogger.d(TAG, "Media items received, starting VideoPlayerFragment");
                 startVideoPlayer();
             } else {
-                Log.d(TAG, "No media items, splash screen displayed, or device blocked");
+                CustomLogger.d(TAG, "No media items, splash screen displayed, or device blocked");
             }
         });
 
         viewModel.getIsDeviceBlocked().observe(this, isBlocked -> {
-            Log.d(TAG, "isDeviceBlocked: " + isBlocked);
+            CustomLogger.d(TAG, "isDeviceBlocked: " + isBlocked);
             boolean newBlockStatus = isBlocked != null && isBlocked;
             if (newBlockStatus != isDeviceBlocked) {
                 isDeviceBlocked = newBlockStatus;
                 if (isDeviceBlocked) {
                     setContentView(R.layout.activity_blocked);
-                    Log.w(TAG, "Device is blocked, showing blocked screen");
+                    CustomLogger.w(TAG, "Device is blocked, showing blocked screen");
                     // Stop and remove VideoPlayerFragment
                     if (videoPlayerFragment != null && videoPlayerFragment.isAdded()) {
                         videoPlayerFragment.pauseVideo();
@@ -169,23 +176,23 @@ public class MainActivity extends AppCompatActivity {
                                 .beginTransaction()
                                 .remove(videoPlayerFragment)
                                 .commit();
-                        Log.d(TAG, "VideoPlayerFragment paused and removed due to device block");
+                        CustomLogger.d(TAG, "VideoPlayerFragment paused and removed due to device block");
                     }
                     // Close app after 3 seconds
                     mainHandler.postDelayed(this::finish, BLOCKED_CLOSE_DELAY_MS);
-                    Log.d(TAG, "Scheduled app closure in " + BLOCKED_CLOSE_DELAY_MS + "ms");
+                    CustomLogger.d(TAG, "Scheduled app closure in " + BLOCKED_CLOSE_DELAY_MS + "ms");
                 } else {
                     setContentView(R.layout.activity_main);
                     // Reinitialize splash logo
                     splashLogo = findViewById(R.id.splash_logo);
                     splashLogo.setVisibility(View.VISIBLE);
-                    Log.d(TAG, "Device unblocked, resuming normal flow");
+                    CustomLogger.d(TAG, "Device unblocked, resuming normal flow");
                     // Reinitialize VideoPlayerFragment and force media check
                     videoPlayerFragment = VideoPlayerFragment.newInstance((Void unused) -> {
                         mainHandler.post(() -> {
                             isSplashDisplayed = false;
                             splashLogo.setVisibility(View.GONE);
-                            Log.d(TAG, "Splash screen hidden after video ready");
+                            CustomLogger.d(TAG, "Splash screen hidden after video ready");
                         });
                     });
                     checkCachedMediaAndStartVideoPlayer();
@@ -196,28 +203,28 @@ public class MainActivity extends AppCompatActivity {
 
     private void startVideoPlayer() {
         if (isDeviceBlocked) {
-            Log.d(TAG, "Device is blocked, not starting video player");
+            CustomLogger.d(TAG, "Device is blocked, not starting video player");
             return;
         }
-        Log.d(TAG, "Starting video player");
+        CustomLogger.d(TAG, "Starting video player");
         if (videoPlayerFragment == null || videoPlayerFragment.isDetached()) {
             videoPlayerFragment = VideoPlayerFragment.newInstance((Void unused) -> {
                 mainHandler.post(() -> {
                     isSplashDisplayed = false;
                     splashLogo.setVisibility(View.GONE);
-                    Log.d(TAG, "Splash screen hidden after video ready");
+                    CustomLogger.d(TAG, "Splash screen hidden after video ready");
                 });
             });
-            Log.d(TAG, "Created new VideoPlayerFragment instance");
+            CustomLogger.d(TAG, "Created new VideoPlayerFragment instance");
         }
         if (!videoPlayerFragment.isAdded()) {
             getSupportFragmentManager()
                     .beginTransaction()
                     .replace(R.id.main_browse_fragment, videoPlayerFragment)
                     .commitAllowingStateLoss();
-            Log.d(TAG, "Fragment transaction committed");
+            CustomLogger.d(TAG, "Fragment transaction committed");
         } else {
-            Log.d(TAG, "VideoPlayerFragment already added");
+            CustomLogger.d(TAG, "VideoPlayerFragment already added");
         }
     }
 
@@ -233,6 +240,7 @@ public class MainActivity extends AppCompatActivity {
 
         // Clear Handler callbacks
         if (mainHandler != null) {
+            CustomLogger.d(TAG, "Clearing Handler callbacks");
             mainHandler.removeCallbacksAndMessages(null);
         }
 
@@ -241,21 +249,49 @@ public class MainActivity extends AppCompatActivity {
             executorService.shutdownNow();
             try {
                 if (!executorService.awaitTermination(1, TimeUnit.SECONDS)) {
-                    Log.w(TAG, "ExecutorService did not terminate");
+                    CustomLogger.w(TAG, "ExecutorService did not terminate");
                 }
             } catch (InterruptedException e) {
+                CustomLogger.d(TAG, "ExecutorService termination interrupted");
                 Thread.currentThread().interrupt();
             }
         }
 
         // Shutdown AppModule's executor
         if (isFinishing()) {
+            CustomLogger.d(TAG, "Activity is finishing, shutting down AppModule's executor");
             appModule.shutdownExecutorService();
         }
 
         // Clear fragment reference
         videoPlayerFragment = null;
 
-        Log.d(TAG, "Activity destroyed, resources released");
+        CustomLogger.d(TAG, "Activity destroyed, resources released");
+    }
+
+    @Override
+    public void onBackPressed() {
+        long currentTime = System.currentTimeMillis();
+        if (currentTime - lastBackPressTime < DOUBLE_BACK_PRESS_INTERVAL) {
+            // Second back press within 2 seconds, launch default launcher
+            CustomLogger.d(TAG, "Double back press detected, launching default launcher");
+            Intent homeIntent = new Intent(Intent.ACTION_MAIN);
+            homeIntent.addCategory(Intent.CATEGORY_HOME);
+            homeIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            try {
+                startActivity(homeIntent);
+                CustomLogger.d(TAG, "Default launcher launched");
+                // Finish MainActivity to exit app
+                finish();
+            } catch (Exception e) {
+                CustomLogger.e(TAG, "Failed to launch default launcher: " + e.getMessage(), e);
+                super.onBackPressed(); // Fallback to default behavior
+            }
+        } else {
+            // First back press, update timestamp
+            lastBackPressTime = currentTime;
+            CustomLogger.d(TAG, "First back press, waiting for second press");
+            // Optionally notify user (e.g., Toast, but TVs may not show it)
+        }
     }
 }

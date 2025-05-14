@@ -10,8 +10,8 @@ android {
         applicationId = "com.example.caesartv"
         minSdk = 21
         targetSdk = 34
-        versionCode = 7
-        versionName = "1.0.7"
+        versionCode = 8
+        versionName = "1.0.8"
 
     }
 
@@ -27,6 +27,13 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+        isCoreLibraryDesugaringEnabled = true
+        
+    }
+
+    dependencies {
+        coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+        implementation("androidx.core:core-ktx:1.12.0")
     }
 }
 
@@ -48,6 +55,10 @@ dependencies {
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.ui)
     implementation(libs.gson)
+    implementation(libs.okhttp)
 
     implementation(libs.androidx.media)
+
+//    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+
 }
