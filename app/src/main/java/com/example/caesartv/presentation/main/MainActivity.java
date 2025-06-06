@@ -1,14 +1,22 @@
 package com.example.caesartv.presentation.main;
 
+import android.app.AlarmManager;
+import android.app.PendingIntent;
+import android.content.Context;
 import android.content.Intent;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.util.Log;
+import android.provider.Settings;
 import android.view.View;
 import android.widget.ImageView;
+import android.widget.Toast;
+
 import androidx.appcompat.app.AppCompatActivity;
 
+import com.example.caesartv.BootReceiver;
 import com.example.caesartv.CustomLogger;
 import com.example.caesartv.R;
 import com.example.caesartv.data.repository.MediaRepositoryImpl;
@@ -23,6 +31,7 @@ import java.util.concurrent.TimeUnit;
 
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
+    private static final int REQUEST_OVERLAY_PERMISSIONS = 1001;
     private MainViewmodel viewModel;
     private Handler mainHandler;
     private GetCachedMediaUseCase cachedMediaUseCase;
@@ -52,6 +61,43 @@ public class MainActivity extends AppCompatActivity {
 
         // Verify cached files
         ((MediaRepositoryImpl) appModule.provideMediaRepository(this)).verifyCachedFiles();
+
+
+//        Intent intent = new Intent(this, BootReceiver.class);
+//
+//        PendingIntent alarmIntent = PendingIntent.getBroadcast(
+//                this,
+//                0,
+//                intent,
+//                PendingIntent.FLAG_IMMUTABLE
+//        );
+//
+//        AlarmManager alarmManager = (AlarmManager) this.getSystemService(Context.ALARM_SERVICE);
+//
+//        if (alarmManager != null) {
+//            alarmManager.setRepeating(
+//                    AlarmManager.RTC_WAKEUP,
+//                    System.currentTimeMillis() + 60 * 500, // Start in 1 minute
+//                    1 * 60 * 1000,                         // Repeat every hour
+//                    alarmIntent
+//
+
+
+//        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+//            if (!Settings.canDrawOverlays(getApplicationContext())) {
+//                Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION);
+//                intent.setData(Uri.parse("package:" + getPackageName()));
+//
+//                if (intent.resolveActivity(getPackageManager()) != null) {
+//                    startActivityForResult(intent, REQUEST_OVERLAY_PERMISSIONS);
+//                } else {
+//                    Toast.makeText(this, "Overlay permission settings not available on this device.", Toast.LENGTH_LONG).show();
+//                }
+//                return;
+//            }
+//        }
+
+
 
         // Show splash screen
         splashLogo = findViewById(R.id.splash_logo);
@@ -294,4 +340,5 @@ public class MainActivity extends AppCompatActivity {
             // Optionally notify user (e.g., Toast, but TVs may not show it)
         }
     }
+
 }

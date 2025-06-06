@@ -22,7 +22,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 
 public class MainViewmodel extends ViewModel {
-
     private static final String TAG = "MainViewModel";
     private final FetchMediaUseCase fetchMediaUseCase;
     private final GetCachedMediaUseCase getCachedMediaUseCase;

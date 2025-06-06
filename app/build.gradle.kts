@@ -10,8 +10,8 @@ android {
         applicationId = "com.example.caesartv"
         minSdk = 21
         targetSdk = 34
-        versionCode = 8
-        versionName = "1.0.8"
+        versionCode = 12
+        versionName = "1.0.12"
 
     }
 
@@ -58,6 +58,7 @@ dependencies {
     implementation(libs.okhttp)
 
     implementation(libs.androidx.media)
+    implementation(libs.androidx.work.runtime)
 
 //    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
 
